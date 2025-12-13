@@ -47,7 +47,7 @@ func DefaultConfig() Config {
 	return Config{
 		Port:            ":80",
 		PageTimeout:     30 * time.Second,
-		ScreenshotQual:  80,
+		ScreenshotQual:  50,
 		CacheTTLSecs:    300,
 		MaxWidth:        1920,
 		MaxHeight:       1920,
