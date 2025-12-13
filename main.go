@@ -464,9 +464,22 @@ func (s *Server) captureScreenshot(url string, width, height int, fullPage bool)
 			proto.NetworkResourceTypePing,
 			proto.NetworkResourceTypePrefetch,
 			proto.NetworkResourceTypeSignedExchange,
-			proto.NetworkResourceTypeEventSource:
+			proto.NetworkResourceTypeEventSource,
+			proto.NetworkResourceTypeManifest:
 			if s.config.Debug {
 				s.logger.Debug("blocked unnecessary", slog.String("type", string(reqType)), slog.String("url", reqURL))
+			}
+			h.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
+			return
+		}
+
+		if strings.HasSuffix(reqURL, "favicon.ico") ||
+			strings.HasSuffix(reqURL, ".webmanifest") ||
+			strings.HasSuffix(reqURL, "manifest.json") ||
+			strings.Contains(reqURL, "apple-touch-icon") ||
+			strings.Contains(reqURL, "android-chrome") {
+			if s.config.Debug {
+				s.logger.Debug("blocked favicon/manifest", slog.String("url", reqURL))
 			}
 			h.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
 			return
