@@ -10,6 +10,9 @@ dev:
 up:
 	@make dev
 
+format:
+	@go fmt
+
 clean:
 	@docker ps -a --filter "ancestor=$(NAME)" -q | xargs -r docker stop || true
 	@docker ps -a --filter "ancestor=$(NAME)" -q | xargs -r docker rm || true

@@ -2,15 +2,15 @@ package main
 
 import (
 	"context"
-	"crypto/md5"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,6 +42,63 @@ type Config struct {
 	BlockMedia      bool
 }
 
+type Dimension struct {
+	Width  int
+	Height int
+}
+
+type Timing struct {
+	Setup      time.Duration
+	Navigation time.Duration
+	Load       time.Duration
+	Screenshot time.Duration
+	Total      time.Duration
+}
+
+type Blocklist struct {
+	domains map[string]struct{}
+	mu      sync.RWMutex
+	logger  *slog.Logger
+}
+
+type Server struct {
+	browser   *rod.Browser
+	semaphore chan struct{}
+	config    Config
+	logger    *slog.Logger
+	blocklist *Blocklist
+}
+
+var (
+	presets = map[string]Dimension{
+		"og":      {1200, 630},
+		"twitter": {1200, 675},
+		"square":  {1080, 1080},
+		"mobile":  {375, 667},
+		"desktop": {1920, 1080},
+	}
+
+	botPattern = regexp.MustCompile(`(?i)bot|crawler|spider|crawling|googlebot|bingbot|yandex|baidu|duckduckbot|slurp|ia_archiver|facebookexternalhit|twitterbot|linkedinbot|embedly|quora|pinterest|slackbot|discordbot|telegrambot|whatsapp|applebot|semrush|ahref|mj12bot|dotbot|petalbot|curl|wget|python|httpie|postman|insomnia|java|ruby|perl|php|go-http-client|scrapy|httpclient|apache-http|okhttp`)
+
+	blockedExtensions = map[string]struct{}{
+		".mp4": {}, ".webm": {}, ".mp3": {}, ".wav": {}, ".ogg": {},
+		".ico": {}, ".webmanifest": {},
+	}
+
+	blockedPaths = []string{"apple-touch-icon", "android-chrome", "manifest.json"}
+
+	criticalDomains = []string{
+		"google-analytics.com", "googletagmanager.com", "hotjar.com",
+		"mixpanel.com", "segment.io", "newrelic.com", "nr-data.net", "sentry.io",
+		"doubleclick.net", "googlesyndication.com", "adservice.google.com",
+		"facebook.net", "ads.linkedin.com", "accounts.google.com",
+		"platform.linkedin.com", "connect.facebook.net", "ponf.linkedin.com",
+		"px.ads.linkedin.com", "bat.bing.com", "tr.snapchat.com",
+		"li.protechts.net", "challenges.cloudflare.com",
+		"intercom.io", "crisp.chat", "drift.com", "zendesk.com",
+	}
+)
+
 func DefaultConfig() Config {
 	return Config{
 		Port:            ":80",
@@ -60,48 +117,6 @@ func DefaultConfig() Config {
 		BlockFonts:      true,
 		BlockMedia:      true,
 	}
-}
-
-type Dimension struct {
-	Width  int
-	Height int
-}
-
-var presets = map[string]Dimension{
-	"og":      {1200, 630},
-	"twitter": {1200, 675},
-	"square":  {1080, 1080},
-	"mobile":  {375, 667},
-	"desktop": {1920, 1080},
-}
-
-var blockedBots = []string{
-	"bot", "crawler", "spider", "crawling",
-	"googlebot", "bingbot", "yandex", "baidu", "duckduckbot",
-	"slurp", "ia_archiver", "facebookexternalhit", "twitterbot",
-	"linkedinbot", "embedly", "quora", "pinterest", "slackbot",
-	"discordbot", "telegrambot", "whatsapp", "applebot",
-	"semrush", "ahref", "mj12bot", "dotbot", "petalbot",
-	"curl", "wget", "python", "httpie", "postman", "insomnia",
-	"java", "ruby", "perl", "php", "go-http-client",
-	"scrapy", "httpclient", "apache-http", "okhttp",
-}
-
-var criticalDomains = []string{
-	"google-analytics.com", "googletagmanager.com", "hotjar.com",
-	"mixpanel.com", "segment.io", "newrelic.com", "nr-data.net", "sentry.io",
-	"doubleclick.net", "googlesyndication.com", "adservice.google.com",
-	"facebook.net", "ads.linkedin.com", "accounts.google.com",
-	"platform.linkedin.com", "connect.facebook.net", "ponf.linkedin.com",
-	"px.ads.linkedin.com", "bat.bing.com", "tr.snapchat.com",
-	"li.protechts.net", "challenges.cloudflare.com",
-	"intercom.io", "crisp.chat", "drift.com", "zendesk.com",
-}
-
-type Blocklist struct {
-	domains map[string]struct{}
-	mu      sync.RWMutex
-	logger  *slog.Logger
 }
 
 func NewBlocklist(logger *slog.Logger) (*Blocklist, error) {
@@ -132,36 +147,9 @@ func NewBlocklist(logger *slog.Logger) (*Blocklist, error) {
 	return bl, nil
 }
 
-func isIPAddress(s string) bool {
-	parts := strings.Split(s, ".")
-	if len(parts) != 4 {
-		return false
-	}
-	for _, p := range parts {
-		if _, err := strconv.Atoi(p); err != nil {
-			return false
-		}
-	}
-	return true
-}
-
-func (bl *Blocklist) IsBlocked(url string) bool {
+func (bl *Blocklist) IsBlocked(host string) bool {
 	bl.mu.RLock()
 	defer bl.mu.RUnlock()
-
-	url = strings.ToLower(url)
-
-	if idx := strings.Index(url, "://"); idx != -1 {
-		url = url[idx+3:]
-	}
-	if idx := strings.Index(url, "/"); idx != -1 {
-		url = url[:idx]
-	}
-	if idx := strings.Index(url, ":"); idx != -1 {
-		url = url[:idx]
-	}
-
-	host := url
 
 	if _, ok := bl.domains[host]; ok {
 		return true
@@ -178,14 +166,6 @@ func (bl *Blocklist) IsBlocked(url string) bool {
 	return false
 }
 
-type Server struct {
-	browser   *rod.Browser
-	semaphore chan struct{}
-	config    Config
-	logger    *slog.Logger
-	blocklist *Blocklist
-}
-
 func NewServer(cfg Config, logger *slog.Logger) (*Server, error) {
 	blocklist, err := NewBlocklist(logger)
 	if err != nil {
@@ -195,10 +175,10 @@ func NewServer(cfg Config, logger *slog.Logger) (*Server, error) {
 
 	path, found := launcher.LookPath()
 	if !found {
-		return nil, fmt.Errorf("browser not found")
+		return nil, errors.New("browser not found")
 	}
 
-	launchURL := launcher.New().
+	url := launcher.New().
 		Bin(path).
 		Headless(true).
 		Set("no-sandbox").
@@ -218,7 +198,7 @@ func NewServer(cfg Config, logger *slog.Logger) (*Server, error) {
 		Set("mute-audio").
 		MustLaunch()
 
-	browser := rod.New().ControlURL(launchURL)
+	browser := rod.New().ControlURL(url)
 	if err := browser.Connect(); err != nil {
 		return nil, fmt.Errorf("connecting to browser: %w", err)
 	}
@@ -236,53 +216,27 @@ func (s *Server) Close() error {
 	return s.browser.Close()
 }
 
-func (s *Server) isBot(userAgent string) bool {
-	if len(userAgent) < s.config.MinUserAgentLen {
-		return true
-	}
-
-	ua := strings.ToLower(userAgent)
-	for _, bot := range blockedBots {
-		if strings.Contains(ua, bot) {
-			return true
-		}
-	}
-	return false
+func (s *Server) ServeHTTP(mux *http.ServeMux) {
+	mux.HandleFunc("GET /robots.txt", s.handleRobots)
+	mux.HandleFunc("GET /healthz", s.handleHealth)
+	mux.HandleFunc("GET /favicon.ico", s.handleFavicon)
+	mux.HandleFunc("GET /site.webmanifest", s.handleWebManifest)
+	mux.HandleFunc("GET /blocked", s.handleBlocked)
+	mux.Handle("GET /static/", http.FileServer(http.FS(assets.EmbeddedFiles)))
+	mux.HandleFunc("GET /", s.handleScreenshot)
 }
 
-func getETag(url string) string {
-	hash := md5.Sum([]byte(url + time.Now().Format("2006-01-02-15")))
-	return hex.EncodeToString(hash[:])
-}
-
-func parseIntParam(r *http.Request, name string, defaultVal, maxVal int) int {
-	val := r.URL.Query().Get(name)
-	if val == "" {
-		return defaultVal
-	}
-
-	n, err := strconv.Atoi(val)
-	if err != nil || n <= 0 {
-		return defaultVal
-	}
-	if n > maxVal {
-		return maxVal
-	}
-	return n
-}
-
-func (s *Server) HandleRobots(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleRobots(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	_, _ = w.Write([]byte("User-agent: *\nDisallow: /\n"))
+	w.Write([]byte("User-agent: *\nDisallow: /\n"))
 }
 
-func (s *Server) HandleHealth(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte("ok"))
+	w.Write([]byte("ok"))
 }
 
-func (s *Server) HandleFavicon(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleFavicon(w http.ResponseWriter, _ *http.Request) {
 	data, err := assets.EmbeddedFiles.ReadFile("static/favicon.ico")
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
@@ -290,10 +244,10 @@ func (s *Server) HandleFavicon(w http.ResponseWriter, _ *http.Request) {
 	}
 	w.Header().Set("Content-Type", "image/x-icon")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
-	_, _ = w.Write(data)
+	w.Write(data)
 }
 
-func (s *Server) HandleWebManifest(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleWebManifest(w http.ResponseWriter, _ *http.Request) {
 	data, err := assets.EmbeddedFiles.ReadFile("static/site.webmanifest")
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
@@ -301,12 +255,22 @@ func (s *Server) HandleWebManifest(w http.ResponseWriter, _ *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/manifest+json")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
-	_, _ = w.Write(data)
+	w.Write(data)
 }
 
-func (s *Server) HandleScreenshot(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+func (s *Server) handleBlocked(w http.ResponseWriter, r *http.Request) {
+	domain := r.URL.Query().Get("domain")
+	if domain == "" {
+		http.Error(w, "missing ?domain=example.com", http.StatusBadRequest)
+		return
+	}
 
+	w.Header().Set("Content-Type", "application/json")
+	blocked := s.blocklist.IsBlocked(domain)
+	fmt.Fprintf(w, `{"domain":%q,"blocked":%t}`, domain, blocked)
+}
+
+func (s *Server) handleScreenshot(w http.ResponseWriter, r *http.Request) {
 	userAgent := r.Header.Get("User-Agent")
 	if s.isBot(userAgent) {
 		s.logger.Warn("blocked bot request", slog.String("ua", userAgent), slog.String("ip", r.RemoteAddr))
@@ -324,24 +288,10 @@ func (s *Server) HandleScreenshot(w http.ResponseWriter, r *http.Request) {
 		targetURL = "https://" + targetURL
 	}
 
-	dim := presets["og"]
-	if preset := r.URL.Query().Get("preset"); preset != "" {
-		if p, ok := presets[preset]; ok {
-			dim = p
-		}
-	}
-	width, height := dim.Width, dim.Height
-
-	if r.URL.Query().Get("width") != "" {
-		width = parseIntParam(r, "width", width, s.config.MaxWidth)
-	}
-	if r.URL.Query().Get("height") != "" {
-		height = parseIntParam(r, "height", height, s.config.MaxHeight)
-	}
-
+	width, height := s.parseDimensions(r)
 	fullPage := r.URL.Query().Get("full") == "true"
 
-	etag := getETag(targetURL)
+	etag := generateETag(targetURL)
 	if r.Header.Get("If-None-Match") == etag {
 		w.WriteHeader(http.StatusNotModified)
 		return
@@ -350,12 +300,12 @@ func (s *Server) HandleScreenshot(w http.ResponseWriter, r *http.Request) {
 	select {
 	case s.semaphore <- struct{}{}:
 		defer func() { <-s.semaphore }()
-	case <-ctx.Done():
+	case <-r.Context().Done():
 		http.Error(w, "request cancelled", http.StatusServiceUnavailable)
 		return
 	}
 
-	screenshot, timing, err := s.captureScreenshot(targetURL, width, height, fullPage)
+	screenshot, timing, err := s.capture(targetURL, width, height, fullPage)
 	if err != nil {
 		s.handleCaptureError(w, targetURL, err, timing)
 		return
@@ -371,18 +321,28 @@ func (s *Server) HandleScreenshot(w http.ResponseWriter, r *http.Request) {
 		slog.Int("size_kb", len(screenshot)/1024),
 	)
 
-	s.writeScreenshotResponse(w, screenshot, etag, timing)
+	s.writeResponse(w, screenshot, etag, timing)
 }
 
-type Timing struct {
-	Setup      time.Duration
-	Navigation time.Duration
-	Load       time.Duration
-	Screenshot time.Duration
-	Total      time.Duration
+func (s *Server) parseDimensions(r *http.Request) (width, height int) {
+	dim := presets["og"]
+	if preset := r.URL.Query().Get("preset"); preset != "" {
+		if p, ok := presets[preset]; ok {
+			dim = p
+		}
+	}
+	width, height = dim.Width, dim.Height
+
+	if r.URL.Query().Get("width") != "" {
+		width = parseIntParam(r, "width", width, s.config.MaxWidth)
+	}
+	if r.URL.Query().Get("height") != "" {
+		height = parseIntParam(r, "height", height, s.config.MaxHeight)
+	}
+	return width, height
 }
 
-func (s *Server) captureScreenshot(url string, width, height int, fullPage bool) ([]byte, Timing, error) {
+func (s *Server) capture(url string, width, height int, fullPage bool) ([]byte, Timing, error) {
 	var timing Timing
 	totalStart := time.Now()
 
@@ -391,7 +351,7 @@ func (s *Server) captureScreenshot(url string, width, height int, fullPage bool)
 	if err != nil {
 		return nil, timing, fmt.Errorf("creating page: %w", err)
 	}
-	defer func() { _ = page.Close() }()
+	defer page.Close()
 
 	if err := page.SetViewport(&proto.EmulationSetDeviceMetricsOverride{
 		Width:             width,
@@ -402,78 +362,7 @@ func (s *Server) captureScreenshot(url string, width, height int, fullPage bool)
 	}
 
 	router := page.HijackRequests()
-	router.MustAdd("*", func(h *rod.Hijack) {
-		reqURL := h.Request.URL().String()
-		reqType := h.Request.Type()
-
-		if s.config.BlockFonts && reqType == proto.NetworkResourceTypeFont {
-			if s.config.Debug {
-				s.logger.Debug("blocked font", slog.String("url", reqURL))
-			}
-			h.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
-			return
-		}
-
-		if s.config.BlockMedia {
-			if reqType == proto.NetworkResourceTypeMedia ||
-				reqType == proto.NetworkResourceTypeWebSocket ||
-				strings.HasSuffix(reqURL, ".mp4") ||
-				strings.HasSuffix(reqURL, ".webm") ||
-				strings.HasSuffix(reqURL, ".mp3") ||
-				strings.HasSuffix(reqURL, ".wav") ||
-				strings.HasSuffix(reqURL, ".ogg") {
-				if s.config.Debug {
-					s.logger.Debug("blocked media", slog.String("type", string(reqType)), slog.String("url", reqURL))
-				}
-				h.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
-				return
-			}
-		}
-
-		switch reqType {
-		case proto.NetworkResourceTypeXHR,
-			proto.NetworkResourceTypeFetch,
-			proto.NetworkResourceTypePing,
-			proto.NetworkResourceTypePrefetch,
-			proto.NetworkResourceTypeSignedExchange,
-			proto.NetworkResourceTypeEventSource,
-			proto.NetworkResourceTypeManifest:
-			if s.config.Debug {
-				s.logger.Debug("blocked unnecessary", slog.String("type", string(reqType)), slog.String("url", reqURL))
-			}
-			h.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
-			return
-		}
-
-		if strings.HasSuffix(reqURL, "favicon.ico") ||
-			strings.HasSuffix(reqURL, ".webmanifest") ||
-			strings.HasSuffix(reqURL, "manifest.json") ||
-			strings.Contains(reqURL, "apple-touch-icon") ||
-			strings.Contains(reqURL, "android-chrome") {
-			if s.config.Debug {
-				s.logger.Debug("blocked favicon/manifest", slog.String("url", reqURL))
-			}
-			h.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
-			return
-		}
-
-		if s.blocklist.IsBlocked(reqURL) &&
-			reqType != proto.NetworkResourceTypeStylesheet &&
-			reqType != proto.NetworkResourceTypeDocument {
-			if s.config.Debug {
-				s.logger.Debug("blocked by blocklist", slog.String("url", reqURL))
-			}
-			h.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
-			return
-		}
-
-		if s.config.Debug {
-			s.logger.Debug("fetching", slog.String("type", string(reqType)), slog.String("url", reqURL))
-		}
-
-		h.ContinueRequest(&proto.FetchContinueRequest{})
-	})
-
+	router.MustAdd("*", s.createRequestHandler())
 	go router.Run()
 	defer router.MustStop()
 	timing.Setup = time.Since(setupStart)
@@ -509,6 +398,84 @@ func (s *Server) captureScreenshot(url string, width, height int, fullPage bool)
 	return screenshot, timing, nil
 }
 
+func (s *Server) createRequestHandler() func(*rod.Hijack) {
+	return func(h *rod.Hijack) {
+		reqURL := h.Request.URL().String()
+		reqType := h.Request.Type()
+
+		if s.shouldBlock(reqURL, reqType) {
+			h.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
+			return
+		}
+
+		if s.config.Debug {
+			s.logger.Debug("fetching", slog.String("type", string(reqType)), slog.String("url", reqURL))
+		}
+		h.ContinueRequest(&proto.FetchContinueRequest{})
+	}
+}
+
+func (s *Server) shouldBlock(reqURL string, reqType proto.NetworkResourceType) bool {
+	if s.config.BlockFonts && reqType == proto.NetworkResourceTypeFont {
+		if s.config.Debug {
+			s.logger.Debug("blocked font", slog.String("url", reqURL))
+		}
+		return true
+	}
+
+	if s.config.BlockMedia {
+		if reqType == proto.NetworkResourceTypeMedia || reqType == proto.NetworkResourceTypeWebSocket {
+			if s.config.Debug {
+				s.logger.Debug("blocked media", slog.String("type", string(reqType)), slog.String("url", reqURL))
+			}
+			return true
+		}
+		if idx := strings.LastIndexByte(reqURL, '.'); idx != -1 {
+			if _, blocked := blockedExtensions[reqURL[idx:]]; blocked {
+				if s.config.Debug {
+					s.logger.Debug("blocked media", slog.String("url", reqURL))
+				}
+				return true
+			}
+		}
+	}
+
+	switch reqType {
+	case proto.NetworkResourceTypeXHR,
+		proto.NetworkResourceTypeFetch,
+		proto.NetworkResourceTypePing,
+		proto.NetworkResourceTypePrefetch,
+		proto.NetworkResourceTypeSignedExchange,
+		proto.NetworkResourceTypeEventSource,
+		proto.NetworkResourceTypeManifest:
+		if s.config.Debug {
+			s.logger.Debug("blocked unnecessary", slog.String("type", string(reqType)), slog.String("url", reqURL))
+		}
+		return true
+	}
+
+	for _, path := range blockedPaths {
+		if strings.Contains(reqURL, path) {
+			if s.config.Debug {
+				s.logger.Debug("blocked favicon/manifest", slog.String("url", reqURL))
+			}
+			return true
+		}
+	}
+
+	if reqType != proto.NetworkResourceTypeStylesheet && reqType != proto.NetworkResourceTypeDocument {
+		host := extractHost(reqURL)
+		if s.blocklist.IsBlocked(host) {
+			if s.config.Debug {
+				s.logger.Debug("blocked by blocklist", slog.String("url", reqURL))
+			}
+			return true
+		}
+	}
+
+	return false
+}
+
 func (s *Server) handleCaptureError(w http.ResponseWriter, url string, err error, timing Timing) {
 	s.logger.Error("screenshot failed",
 		slog.String("url", url),
@@ -523,7 +490,7 @@ func (s *Server) handleCaptureError(w http.ResponseWriter, url string, err error
 	http.Error(w, "failed to capture screenshot", http.StatusInternalServerError)
 }
 
-func (s *Server) writeScreenshotResponse(w http.ResponseWriter, screenshot []byte, etag string, timing Timing) {
+func (s *Server) writeResponse(w http.ResponseWriter, screenshot []byte, etag string, timing Timing) {
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", s.config.CacheTTLSecs))
 	w.Header().Set("ETag", etag)
@@ -538,7 +505,47 @@ func (s *Server) writeScreenshotResponse(w http.ResponseWriter, screenshot []byt
 	}
 }
 
-func main() {
+func (s *Server) isBot(userAgent string) bool {
+	return len(userAgent) < s.config.MinUserAgentLen || botPattern.MatchString(userAgent)
+}
+
+func extractHost(rawURL string) string {
+	url := rawURL
+	if idx := strings.Index(url, "://"); idx != -1 {
+		url = url[idx+3:]
+	}
+	if idx := strings.IndexByte(url, '/'); idx != -1 {
+		url = url[:idx]
+	}
+	if idx := strings.IndexByte(url, ':'); idx != -1 {
+		url = url[:idx]
+	}
+	return strings.ToLower(url)
+}
+
+func generateETag(url string) string {
+	h := fnv.New64a()
+	h.Write([]byte(url))
+	h.Write([]byte(time.Now().Format("2006-01-02-15")))
+	return strconv.FormatUint(h.Sum64(), 36)
+}
+
+func parseIntParam(r *http.Request, name string, defaultVal, maxVal int) int {
+	val := r.URL.Query().Get(name)
+	if val == "" {
+		return defaultVal
+	}
+	n, err := strconv.Atoi(val)
+	if err != nil || n <= 0 {
+		return defaultVal
+	}
+	if n > maxVal {
+		return maxVal
+	}
+	return n
+}
+
+func run() error {
 	cfg := DefaultConfig()
 
 	logLevel := slog.LevelInfo
@@ -552,17 +559,12 @@ func main() {
 
 	srv, err := NewServer(cfg, logger)
 	if err != nil {
-		logger.Error("failed to create server", slog.String("error", err.Error()))
-		os.Exit(1)
+		return fmt.Errorf("creating server: %w", err)
 	}
+	defer srv.Close()
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /robots.txt", srv.HandleRobots)
-	mux.HandleFunc("GET /healthz", srv.HandleHealth)
-	mux.HandleFunc("GET /favicon.ico", srv.HandleFavicon)
-	mux.HandleFunc("GET /site.webmanifest", srv.HandleWebManifest)
-	mux.Handle("GET /static/", http.FileServer(http.FS(assets.EmbeddedFiles)))
-	mux.HandleFunc("GET /", srv.HandleScreenshot)
+	srv.ServeHTTP(mux)
 
 	httpServer := &http.Server{
 		Addr:         cfg.Port,
@@ -572,30 +574,38 @@ func main() {
 		IdleTimeout:  cfg.IdleTimeout,
 	}
 
+	errChan := make(chan error, 1)
 	go func() {
 		logger.Info("server starting", slog.String("addr", cfg.Port))
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("server error", slog.String("error", err.Error()))
-			os.Exit(1)
+			errChan <- err
 		}
 	}()
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	sig := <-sigChan
 
-	logger.Info("shutting down", slog.String("signal", sig.String()))
+	select {
+	case err := <-errChan:
+		return fmt.Errorf("server error: %w", err)
+	case sig := <-sigChan:
+		logger.Info("shutting down", slog.String("signal", sig.String()))
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 
 	if err := httpServer.Shutdown(ctx); err != nil {
-		logger.Error("shutdown error", slog.String("error", err.Error()))
-	}
-
-	if err := srv.Close(); err != nil {
-		logger.Error("browser close error", slog.String("error", err.Error()))
+		return fmt.Errorf("shutdown error: %w", err)
 	}
 
 	logger.Info("server stopped")
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
 }
