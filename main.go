@@ -222,6 +222,7 @@ func (s *Server) ServeHTTP(mux *http.ServeMux) {
 	mux.HandleFunc("GET /favicon.ico", s.handleFavicon)
 	mux.HandleFunc("GET /site.webmanifest", s.handleWebManifest)
 	mux.HandleFunc("GET /blocked", s.handleBlocked)
+	mux.HandleFunc("GET /domains.json", s.handleDomains)
 	mux.Handle("GET /static/", http.FileServer(http.FS(assets.EmbeddedFiles)))
 	mux.HandleFunc("GET /", s.handleScreenshot)
 }
@@ -268,6 +269,17 @@ func (s *Server) handleBlocked(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	blocked := s.blocklist.IsBlocked(domain)
 	fmt.Fprintf(w, `{"domain":%q,"blocked":%t}`, domain, blocked)
+}
+
+func (s *Server) handleDomains(w http.ResponseWriter, _ *http.Request) {
+	data, err := assets.EmbeddedFiles.ReadFile("filters/domains.json")
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Write(data)
 }
 
 func (s *Server) handleScreenshot(w http.ResponseWriter, r *http.Request) {
