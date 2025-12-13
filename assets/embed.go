@@ -2,5 +2,5 @@ package assets
 
 import "embed"
 
-//go:embed *.txt
-var FilterLists embed.FS
+//go:embed "filters" "static"
+var EmbeddedFiles embed.FS

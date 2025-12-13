@@ -115,7 +115,7 @@ func NewBlocklist(logger *slog.Logger) (*Blocklist, error) {
 		bl.domains[d] = struct{}{}
 	}
 
-	files, err := assets.FilterLists.ReadDir(".")
+	files, err := assets.EmbeddedFiles.ReadDir("filters")
 	if err != nil {
 		return nil, fmt.Errorf("reading embedded assets: %w", err)
 	}
@@ -125,7 +125,7 @@ func NewBlocklist(logger *slog.Logger) (*Blocklist, error) {
 			continue
 		}
 
-		file, err := assets.FilterLists.Open(f.Name())
+		file, err := assets.EmbeddedFiles.Open("filters/" + f.Name())
 		if err != nil {
 			logger.Warn("failed to open embedded file", slog.String("file", f.Name()), slog.String("error", err.Error()))
 			continue
@@ -330,6 +330,28 @@ func (s *Server) HandleHealth(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok"))
+}
+
+func (s *Server) HandleFavicon(w http.ResponseWriter, _ *http.Request) {
+	data, err := assets.EmbeddedFiles.ReadFile("static/favicon.ico")
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "image/x-icon")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = w.Write(data)
+}
+
+func (s *Server) HandleWebManifest(w http.ResponseWriter, _ *http.Request) {
+	data, err := assets.EmbeddedFiles.ReadFile("static/site.webmanifest")
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/manifest+json")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = w.Write(data)
 }
 
 func (s *Server) HandleScreenshot(w http.ResponseWriter, r *http.Request) {
@@ -587,6 +609,9 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /robots.txt", srv.HandleRobots)
 	mux.HandleFunc("GET /healthz", srv.HandleHealth)
+	mux.HandleFunc("GET /favicon.ico", srv.HandleFavicon)
+	mux.HandleFunc("GET /site.webmanifest", srv.HandleWebManifest)
+	mux.Handle("GET /static/", http.FileServer(http.FS(assets.EmbeddedFiles)))
 	mux.HandleFunc("GET /", srv.HandleScreenshot)
 
 	httpServer := &http.Server{
