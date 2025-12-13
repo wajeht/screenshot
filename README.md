@@ -80,6 +80,26 @@ Returns robots.txt disallowing all crawlers.
 
 Health check endpoint. Returns `ok` if the service is healthy.
 
+### GET /blocked
+
+Check if a domain is in the blocklist.
+
+**Parameters:**
+- `domain` (required): The domain to check
+
+**Examples:**
+```
+https://screenshot.jaw.dev/blocked?domain=doubleclick.net
+# {"domain":"doubleclick.net","blocked":true}
+
+https://screenshot.jaw.dev/blocked?domain=google.com
+# {"domain":"google.com","blocked":false}
+```
+
+### GET /domains.json
+
+Returns the full list of blocked domains as JSON array (~102k domains).
+
 ## 📑 Docs
 
 - See [DEVELOPMENT](./docs/development.md) for `development` guide.
