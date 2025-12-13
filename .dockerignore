@@ -5,13 +5,20 @@
 # Documentation
 README.md
 LICENSE
+docs/
 
 # Development files
 *.db
 data/
+.env
+.env.example
+Makefile
+filter_parser.go
+assets/filters/*.txt
 
 # Docker files
 Dockerfile
+Dockerfile.dev
 .dockerignore
 
 # IDE files
