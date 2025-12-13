@@ -101,8 +101,20 @@ var (
 )
 
 func DefaultConfig() Config {
+	port := os.Getenv("APP_PORT")
+	if port == "" {
+		port = "80"
+	}
+
+	env := os.Getenv("APP_ENV")
+	if env == "" {
+		env = "development"
+	}
+
+	debug := env != "production"
+
 	return Config{
-		Port:            ":80",
+		Port:            ":" + port,
 		PageTimeout:     30 * time.Second,
 		ScreenshotQual:  50,
 		CacheTTLSecs:    300,
@@ -114,7 +126,7 @@ func DefaultConfig() Config {
 		WriteTimeout:    60 * time.Second,
 		IdleTimeout:     120 * time.Second,
 		MinUserAgentLen: 20,
-		Debug:           true,
+		Debug:           debug,
 		BlockFonts:      true,
 		BlockMedia:      true,
 	}
