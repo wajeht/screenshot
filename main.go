@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +21,8 @@ import (
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/proto"
+
+	"github.com/wajeht/screenshot/assets"
 )
 
 type Config struct {
@@ -38,9 +39,6 @@ type Config struct {
 	IdleTimeout     time.Duration
 	MinUserAgentLen int
 	Debug           bool
-	BlocklistURLs   []string
-	BlocklistCache  string
-	BlocklistMaxAge time.Duration
 	BlockFonts      bool
 	BlockMedia      bool
 }
@@ -60,22 +58,6 @@ func DefaultConfig() Config {
 		IdleTimeout:     120 * time.Second,
 		MinUserAgentLen: 20,
 		Debug:           true,
-		BlocklistURLs: []string{
-			"https://ublockorigin.github.io/uAssets/filters/filters.txt",
-			"https://ublockorigin.github.io/uAssets/filters/badware.txt",
-			"https://ublockorigin.github.io/uAssets/filters/privacy.txt",
-			"https://ublockorigin.github.io/uAssets/filters/annoyances-cookies.txt",
-			"https://ublockorigin.github.io/uAssets/filters/annoyances-others.txt",
-			"https://ublockorigin.github.io/uAssets/thirdparties/easylist.txt",
-			"https://ublockorigin.github.io/uAssets/thirdparties/easyprivacy.txt",
-			"https://ublockorigin.github.io/uAssets/thirdparties/easylist-annoyances.txt",
-			"https://ublockorigin.github.io/uAssets/thirdparties/easylist-social.txt",
-			"https://ublockorigin.github.io/uAssets/thirdparties/easylist-chat.txt",
-			"https://ublockorigin.github.io/uAssets/thirdparties/easylist-newsletters.txt",
-			"https://ublockorigin.github.io/uAssets/thirdparties/easylist-notifications.txt",
-		},
-		BlocklistCache:  "/tmp/ublock-domains.txt",
-		BlocklistMaxAge: 24 * time.Hour,
 		BlockFonts:      true,
 		BlockMedia:      true,
 	}
@@ -123,7 +105,7 @@ type Blocklist struct {
 	logger  *slog.Logger
 }
 
-func NewBlocklist(cfg Config, logger *slog.Logger) (*Blocklist, error) {
+func NewBlocklist(logger *slog.Logger) (*Blocklist, error) {
 	bl := &Blocklist{
 		domains: make(map[string]struct{}),
 		logger:  logger,
@@ -133,90 +115,30 @@ func NewBlocklist(cfg Config, logger *slog.Logger) (*Blocklist, error) {
 		bl.domains[d] = struct{}{}
 	}
 
-	if err := bl.loadFromCache(cfg); err != nil {
-		logger.Info("cache miss or expired, downloading blocklist", slog.String("error", err.Error()))
-		if err := bl.download(cfg); err != nil {
-			logger.Warn("failed to download blocklist, using built-in list only", slog.String("error", err.Error()))
+	files, err := assets.FilterLists.ReadDir(".")
+	if err != nil {
+		return nil, fmt.Errorf("reading embedded assets: %w", err)
+	}
+
+	for _, f := range files {
+		if f.IsDir() || !strings.HasSuffix(f.Name(), ".txt") {
+			continue
 		}
+
+		file, err := assets.FilterLists.Open(f.Name())
+		if err != nil {
+			logger.Warn("failed to open embedded file", slog.String("file", f.Name()), slog.String("error", err.Error()))
+			continue
+		}
+
+		if err := bl.parseFilterList(file); err != nil {
+			logger.Warn("failed to parse embedded file", slog.String("file", f.Name()), slog.String("error", err.Error()))
+		}
+		file.Close()
 	}
 
 	logger.Info("blocklist loaded", slog.Int("domains", len(bl.domains)))
 	return bl, nil
-}
-
-func (bl *Blocklist) loadFromCache(cfg Config) error {
-	info, err := os.Stat(cfg.BlocklistCache)
-	if err != nil {
-		return fmt.Errorf("cache file not found: %w", err)
-	}
-
-	if time.Since(info.ModTime()) > cfg.BlocklistMaxAge {
-		return fmt.Errorf("cache expired")
-	}
-
-	file, err := os.Open(cfg.BlocklistCache)
-	if err != nil {
-		return fmt.Errorf("opening cache: %w", err)
-	}
-	defer file.Close()
-
-	return bl.parseHostsFile(file)
-}
-
-func (bl *Blocklist) download(cfg Config) error {
-	client := &http.Client{Timeout: 60 * time.Second}
-
-	var wg sync.WaitGroup
-	for _, url := range cfg.BlocklistURLs {
-		wg.Add(1)
-		go func(u string) {
-			defer wg.Done()
-			bl.logger.Info("downloading blocklist", slog.String("url", u))
-
-			resp, err := client.Get(u)
-			if err != nil {
-				bl.logger.Warn("failed to fetch blocklist", slog.String("url", u), slog.String("error", err.Error()))
-				return
-			}
-			defer resp.Body.Close()
-
-			if resp.StatusCode != http.StatusOK {
-				bl.logger.Warn("unexpected status", slog.String("url", u), slog.Int("status", resp.StatusCode))
-				return
-			}
-
-			if err := bl.parseFilterList(resp.Body); err != nil {
-				bl.logger.Warn("failed to parse blocklist", slog.String("url", u), slog.String("error", err.Error()))
-			}
-		}(url)
-	}
-	wg.Wait()
-
-	if err := bl.saveCache(cfg.BlocklistCache); err != nil {
-		bl.logger.Warn("failed to save cache", slog.String("error", err.Error()))
-	}
-
-	return nil
-}
-
-func (bl *Blocklist) saveCache(path string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return fmt.Errorf("creating cache dir: %w", err)
-	}
-
-	file, err := os.Create(path)
-	if err != nil {
-		return fmt.Errorf("creating cache file: %w", err)
-	}
-	defer file.Close()
-
-	bl.mu.RLock()
-	defer bl.mu.RUnlock()
-
-	for domain := range bl.domains {
-		fmt.Fprintln(file, domain)
-	}
-	return nil
 }
 
 func (bl *Blocklist) parseFilterList(r io.Reader) error {
@@ -273,48 +195,6 @@ func isIPAddress(s string) bool {
 	return true
 }
 
-func (bl *Blocklist) parseHostsFile(r io.Reader) error {
-	bl.mu.Lock()
-	defer bl.mu.Unlock()
-
-	scanner := bufio.NewScanner(r)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "!") {
-			continue
-		}
-
-		var domain string
-		fields := strings.Fields(line)
-
-		if len(fields) >= 2 {
-			ip := fields[0]
-			if ip == "0.0.0.0" || ip == "127.0.0.1" {
-				domain = fields[1]
-			} else {
-				continue
-			}
-		} else if len(fields) == 1 {
-			domain = fields[0]
-		} else {
-			continue
-		}
-
-		domain = strings.ToLower(domain)
-
-		if domain == "localhost" || domain == "localhost.localdomain" ||
-			domain == "local" || strings.HasPrefix(domain, "broadcasthost") ||
-			!strings.Contains(domain, ".") {
-			continue
-		}
-
-		bl.domains[domain] = struct{}{}
-	}
-
-	return scanner.Err()
-}
-
 func (bl *Blocklist) IsBlocked(url string) bool {
 	bl.mu.RLock()
 	defer bl.mu.RUnlock()
@@ -357,7 +237,7 @@ type Server struct {
 }
 
 func NewServer(cfg Config, logger *slog.Logger) (*Server, error) {
-	blocklist, err := NewBlocklist(cfg, logger)
+	blocklist, err := NewBlocklist(logger)
 	if err != nil {
 		logger.Warn("failed to initialize blocklist", slog.String("error", err.Error()))
 		blocklist = &Blocklist{domains: make(map[string]struct{}), logger: logger}
