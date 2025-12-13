@@ -23,7 +23,7 @@ or with options:
    - Validates the URL and checks for bot requests
    - Uses a headless Chrome browser via go-rod
    - Blocks unnecessary resources (ads, trackers, fonts, media) for faster loading
-   - Captures the screenshot as JPEG
+   - Captures the screenshot as WebP
 
 2. **Caching**:
    - Supports ETag-based browser caching
@@ -64,7 +64,7 @@ https://screenshot.jaw.dev?url=github.com&full=true
 ```
 
 **Response Headers:**
-- `Content-Type`: image/jpeg
+- `Content-Type`: image/webp
 - `Cache-Control`: public, max-age=300
 - `ETag`: Hash-based cache identifier
 - `X-Setup-Ms`: Browser setup time

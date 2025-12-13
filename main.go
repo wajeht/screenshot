@@ -397,7 +397,7 @@ func (s *Server) capture(url string, width, height int, fullPage bool) ([]byte, 
 	screenshotStart := time.Now()
 	quality := s.config.ScreenshotQual
 	screenshot, err := page.Screenshot(fullPage, &proto.PageCaptureScreenshot{
-		Format:           proto.PageCaptureScreenshotFormatJpeg,
+		Format:           proto.PageCaptureScreenshotFormatWebp,
 		Quality:          &quality,
 		OptimizeForSpeed: true,
 	})
@@ -504,7 +504,7 @@ func (s *Server) handleCaptureError(w http.ResponseWriter, url string, err error
 }
 
 func (s *Server) writeResponse(w http.ResponseWriter, screenshot []byte, etag string, timing Timing) {
-	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Content-Type", "image/webp")
 	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", s.config.CacheTTLSecs))
 	w.Header().Set("ETag", etag)
 	w.Header().Set("X-Setup-Ms", strconv.FormatInt(timing.Setup.Milliseconds(), 10))
