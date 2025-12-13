@@ -1,94 +1,80 @@
-# 🌐 Screenshot 
-[![Node.js CI](https://github.com/wajeht/favicon/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/wajeht/favicon/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/wajeht/favicon/blob/main/LICENSE) [![Open Source Love svg1](https://badges.frapsoft.com/os/v1/open-source.svg?v=103)](https://github.com/wajeht/favicon)
+# 🌐 Screenshot
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/wajeht/screenshot/blob/main/LICENSE) [![Open Source Love svg1](https://badges.frapsoft.com/os/v1/open-source.svg?v=103)](https://github.com/wajeht/screenshot)
 
-automagically grab the favicon of a url
-
+automagically capture screenshots of any url
 
 # 📖 Usage
 
 add this to your html:
 
 ```html
-<img loading="lazy" src="https://favicon.jaw.dev?url=<url>" />
+<img loading="lazy" src="https://screenshot.jaw.dev?url=<url>" />
 ```
 
-> [!NOTE]
-> the first request will be slow, but the subsequent requests will be cached.
+or with options:
+
+```html
+<img loading="lazy" src="https://screenshot.jaw.dev?url=<url>&preset=twitter" />
+```
 
 ## How it works
 
-1. **First Request (Cache Miss)**:
-   - Extracts the domain from the provided URL
-   - Attempts to fetch favicon from multiple common locations in parallel:
-     - `/favicon.ico`, `/favicon.png`, `/favicon.svg`
-     - Apple touch icons
-     - Web app manifest icons
-   - Returns the first successful match (within 1.5 second timeout)
-   - Optimizes images by resizing to 16x16 if needed
-   - Stores the favicon in SQLite database with 24-hour expiration
-   - Returns the favicon with `X-Favicon-Source: fetched` header
+1. **Request Processing**:
+   - Validates the URL and checks for bot requests
+   - Uses a headless Chrome browser via go-rod
+   - Blocks unnecessary resources (ads, trackers, fonts, media) for faster loading
+   - Captures the screenshot as JPEG
 
-2. **Subsequent Requests (Cache Hit)**:
-   - Checks database for cached favicon
-   - If found and not expired, returns immediately
-   - Response includes ETag for browser caching
-   - Returns with `X-Favicon-Source: cached` header
-   - Much faster than initial fetch (~3µs vs 500ms+)
+2. **Caching**:
+   - Supports ETag-based browser caching
+   - Cache TTL of 5 minutes (300 seconds)
+   - Returns `304 Not Modified` for cached requests
 
-3. **Fallback**:
-   - If no favicon found after timeout, returns a default favicon
-   - Response includes `X-Favicon-Source: default` header
+3. **Performance Optimizations**:
+   - Concurrent request limiting (max 10 simultaneous)
+   - Blocks analytics, ads, and tracking scripts
+   - Blocks fonts and media files for faster rendering
+   - 30 second page timeout
 
 ## API Endpoints
 
 ### GET /
 
-Fetches the favicon for a given URL.
+Captures a screenshot of the given URL.
 
 **Parameters:**
-- `url` (required): The URL to fetch the favicon for
+- `url` (required): The URL to screenshot
+- `preset` (optional): Dimension preset
+  - `og` (default): 1200x630 (OpenGraph)
+  - `twitter`: 1200x675
+  - `square`: 1080x1080
+  - `mobile`: 375x667
+  - `desktop`: 1920x1080
+- `width` (optional): Custom width (max 1920)
+- `height` (optional): Custom height (max 1920)
+- `full` (optional): Set to `true` for full page screenshot
 
-**Example:**
+**Examples:**
 ```
-https://favicon.jaw.dev?url=github.com
-```
-
-### GET /domains
-
-Lists all cached favicons in the database.
-
-**Parameters:**
-- `format` (optional): Response format
-  - Default: HTML table view
-  - `json`: Returns JSON array
-
-**HTML Response:**
-
-Returns an HTML table with the following columns:
-- `id`: Database ID
-- `domain`: Cached domain
-- `data`: Favicon preview with size in bytes
-- `content_type`: MIME type of the favicon
-- `created_at`: Timestamp when cached
-
-**JSON Response:**
-
-```bash
-curl https://favicon.jaw.dev/domains?format=json
+https://screenshot.jaw.dev?url=github.com
+https://screenshot.jaw.dev?url=github.com&preset=twitter
+https://screenshot.jaw.dev?url=github.com&width=800&height=600
+https://screenshot.jaw.dev?url=github.com&full=true
 ```
 
-Returns JSON array:
-```json
-[
-  {
-    "id": 1,
-    "domain": "github.com",
-    "data_size": 5430,
-    "content_type": "image/png",
-    "created_at": "2025-10-15 04:55:40"
-  }
-]
-```
+**Response Headers:**
+- `Content-Type`: image/jpeg
+- `Cache-Control`: public, max-age=300
+- `ETag`: Hash-based cache identifier
+- `X-Setup-Ms`: Browser setup time
+- `X-Nav-Ms`: Navigation time
+- `X-Load-Ms`: Page load time
+- `X-Screenshot-Ms`: Screenshot capture time
+- `X-Total-Ms`: Total processing time
+
+### GET /robots.txt
+
+Returns robots.txt disallowing all crawlers.
 
 ### GET /healthz
 
