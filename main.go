@@ -586,7 +586,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /robots.txt", srv.HandleRobots)
-	mux.HandleFunc("GET /health", srv.HandleHealth)
+	mux.HandleFunc("GET /healthz", srv.HandleHealth)
 	mux.HandleFunc("GET /", srv.HandleScreenshot)
 
 	httpServer := &http.Server{

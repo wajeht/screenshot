@@ -1,3 +1,5 @@
+SHELL := /bin/bash
+
 NAME=screenshot
 PORT=80
 
@@ -16,3 +18,10 @@ clean:
 	@docker volume prune -f
 	@rm -f *.db *.sqlite *.sqlite-shm *.sqlite-wal
 	@rm -rf tmp logs
+
+deploy:
+	@set -a && source .env && set +a && npx caprover deploy \
+		--caproverUrl "$$CAPROVER_DOMAIN" \
+		--appToken "$$CAPROVER_APP_TOKEN" \
+		--appName "$$CAPROVER_APP_NAME" \
+		-b "$$(git rev-parse --abbrev-ref HEAD)"
