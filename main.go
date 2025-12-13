@@ -1,13 +1,12 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -115,71 +114,22 @@ func NewBlocklist(logger *slog.Logger) (*Blocklist, error) {
 		bl.domains[d] = struct{}{}
 	}
 
-	files, err := assets.EmbeddedFiles.ReadDir("filters")
+	data, err := assets.EmbeddedFiles.ReadFile("filters/domains.json")
 	if err != nil {
-		return nil, fmt.Errorf("reading embedded assets: %w", err)
+		return nil, fmt.Errorf("reading domains.json: %w", err)
 	}
 
-	for _, f := range files {
-		if f.IsDir() || !strings.HasSuffix(f.Name(), ".txt") {
-			continue
-		}
+	var domainList []string
+	if err := json.Unmarshal(data, &domainList); err != nil {
+		return nil, fmt.Errorf("parsing domains.json: %w", err)
+	}
 
-		file, err := assets.EmbeddedFiles.Open("filters/" + f.Name())
-		if err != nil {
-			logger.Warn("failed to open embedded file", slog.String("file", f.Name()), slog.String("error", err.Error()))
-			continue
-		}
-
-		if err := bl.parseFilterList(file); err != nil {
-			logger.Warn("failed to parse embedded file", slog.String("file", f.Name()), slog.String("error", err.Error()))
-		}
-		file.Close()
+	for _, d := range domainList {
+		bl.domains[d] = struct{}{}
 	}
 
 	logger.Info("blocklist loaded", slog.Int("domains", len(bl.domains)))
 	return bl, nil
-}
-
-func (bl *Blocklist) parseFilterList(r io.Reader) error {
-	bl.mu.Lock()
-	defer bl.mu.Unlock()
-
-	scanner := bufio.NewScanner(r)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-
-		if line == "" || strings.HasPrefix(line, "!") || strings.HasPrefix(line, "[") ||
-			strings.HasPrefix(line, "@@") || strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		if strings.HasPrefix(line, "||") {
-			line = line[2:]
-
-			endIdx := len(line)
-			for i, c := range line {
-				if c == '^' || c == '$' || c == '/' || c == '*' || c == '|' {
-					endIdx = i
-					break
-				}
-			}
-
-			domain := strings.ToLower(line[:endIdx])
-
-			if strings.Contains(domain, "*") || !strings.Contains(domain, ".") {
-				continue
-			}
-
-			if isIPAddress(domain) {
-				continue
-			}
-
-			bl.domains[domain] = struct{}{}
-		}
-	}
-
-	return scanner.Err()
 }
 
 func isIPAddress(s string) bool {

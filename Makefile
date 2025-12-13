@@ -19,6 +19,9 @@ clean:
 	@rm -f *.db *.sqlite *.sqlite-shm *.sqlite-wal
 	@rm -rf tmp logs
 
+filters:
+	@go run filter_parser.go
+
 deploy:
 	@set -a && source .env && set +a && npx caprover deploy \
 		--caproverUrl "$$CAPROVER_DOMAIN" \
