@@ -1,15 +1,4 @@
-FROM golang:1.24-alpine AS builder
-
-RUN apk add --no-cache \
-    chromium \
-    nss \
-    freetype \
-    freetype-dev \
-    harfbuzz \
-    ttf-freefont \
-    fontconfig \
-    ca-certificates \
-    git
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
@@ -18,20 +7,18 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -o screenshot
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o screenshot
 
-FROM alpine:latest
+FROM alpine:3.20
 
 RUN apk add --no-cache \
     chromium \
     nss \
     freetype \
     harfbuzz \
-    ttf-freefont \
-    fontconfig \
-    ca-certificates
+    ca-certificates \
+    && adduser -D roduser
 
-RUN adduser -D roduser
 USER roduser
 
 WORKDIR /app

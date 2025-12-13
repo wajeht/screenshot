@@ -1,18 +1,18 @@
-IMAGE_NAME=screenshot
-CONTAINER_NAME=screenshot-container
+NAME=screenshot
 PORT=80
 
-build:
-	docker build -t $(IMAGE_NAME) .
+dev:
+	@docker build -f Dockerfile.dev -t $(NAME) .
+	@docker run --rm -it -p $(PORT):80 -v $(PWD):/app $(NAME)
 
-run: build
-	docker run --rm -d -p $(PORT):80 --name $(CONTAINER_NAME) $(IMAGE_NAME)
+up:
+	@make dev
 
-stop:
-	docker stop $(CONTAINER_NAME) || true
-	docker rm $(CONTAINER_NAME) || true
-
-restart: stop run
-
-logs:
-	docker logs -f $(CONTAINER_NAME)
+clean:
+	@docker ps -a --filter "ancestor=$(NAME)" -q | xargs -r docker stop || true
+	@docker ps -a --filter "ancestor=$(NAME)" -q | xargs -r docker rm || true
+	@docker rmi $(NAME) || true
+	@docker builder prune -af
+	@docker volume prune -f
+	@rm -f *.db *.sqlite *.sqlite-shm *.sqlite-wal
+	@rm -rf tmp logs
