@@ -71,7 +71,7 @@ type Server struct {
 
 var (
 	presets = map[string]Dimension{
-		"tiny":    {300, 200},
+		"thumb":   {800, 420},
 		"og":      {1200, 630},
 		"twitter": {1200, 675},
 		"square":  {1080, 1080},
@@ -338,7 +338,7 @@ func (s *Server) handleScreenshot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) parseDimensions(r *http.Request) (width, height int) {
-	dim := presets["tiny"]
+	dim := presets["thumb"]
 	if preset := r.URL.Query().Get("preset"); preset != "" {
 		if p, ok := presets[preset]; ok {
 			dim = p

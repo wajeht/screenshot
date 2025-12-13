@@ -45,7 +45,7 @@ Captures a screenshot of the given URL.
 **Parameters:**
 - `url` (required): The URL to screenshot
 - `preset` (optional): Dimension preset
-  - `tiny` (default): 300x200
+  - `thumb` (default): 800x420
   - `og`: 1200x630 (OpenGraph)
   - `twitter`: 1200x675
   - `square`: 1080x1080
