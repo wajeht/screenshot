@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -21,6 +23,8 @@ import (
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/proto"
+	_ "github.com/mattn/go-sqlite3"
+	"github.com/pressly/goose/v3"
 
 	"github.com/wajeht/screenshot/assets"
 )
@@ -69,12 +73,165 @@ type Server struct {
 	logger    *slog.Logger
 	blocklist *Blocklist
 	templates map[string]*template.Template
+	repo      *ScreenshotRepository
 }
 
 type PageData struct {
 	Title   string
 	Code    int
 	Message string
+}
+
+type ScreenshotRepository struct {
+	db *sql.DB
+}
+
+const (
+	maxOpenConns    = 100
+	maxIdleConns    = 25
+	connMaxLifetime = 5 * time.Minute
+)
+
+var ErrNotFound = errors.New("screenshot not found")
+
+func NewScreenshotRepository(dbPath string) (*ScreenshotRepository, error) {
+	path := strings.Split(dbPath, "?")[0]
+	dir := filepath.Dir(path)
+
+	dbExists := false
+	if _, err := os.Stat(path); err == nil {
+		dbExists = true
+	}
+
+	if !dbExists {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create database directory: %w", err)
+		}
+	}
+
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+
+	db.SetMaxOpenConns(maxOpenConns)
+	db.SetMaxIdleConns(maxIdleConns)
+	db.SetConnMaxLifetime(connMaxLifetime)
+
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to ping database: %w", err)
+	}
+
+	if err := applyPragmas(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to apply pragmas: %w", err)
+	}
+
+	if err := runMigrations(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to run migrations: %w", err)
+	}
+
+	return &ScreenshotRepository{db: db}, nil
+}
+
+func applyPragmas(db *sql.DB) error {
+	pragmas := []string{
+		"PRAGMA journal_mode=WAL",
+		"PRAGMA synchronous=NORMAL",
+		"PRAGMA cache_size=10000",
+		"PRAGMA temp_store=MEMORY",
+		"PRAGMA mmap_size=268435456",
+	}
+
+	for _, pragma := range pragmas {
+		if _, err := db.Exec(pragma); err != nil {
+			slog.Warn("failed to set pragma", slog.String("pragma", pragma), slog.String("error", err.Error()))
+		}
+	}
+
+	return nil
+}
+
+func runMigrations(db *sql.DB) error {
+	goose.SetBaseFS(assets.EmbeddedFiles)
+
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		return fmt.Errorf("failed to set goose dialect: %w", err)
+	}
+
+	if err := goose.Up(db, "migrations"); err != nil {
+		return fmt.Errorf("failed to run migrations: %w", err)
+	}
+
+	return nil
+}
+
+func (r *ScreenshotRepository) Get(url string, width, height int) ([]byte, string, error) {
+	var data []byte
+	var contentType string
+
+	query := `SELECT data, content_type FROM screenshots WHERE url = ? AND width = ? AND height = ?`
+	err := r.db.QueryRow(query, url, width, height).Scan(&data, &contentType)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, "", ErrNotFound
+		}
+		return nil, "", fmt.Errorf("failed to get screenshot: %w", err)
+	}
+
+	return data, contentType, nil
+}
+
+func (r *ScreenshotRepository) Save(url string, data []byte, contentType string, width, height int) error {
+	query := `INSERT OR REPLACE INTO screenshots (url, data, content_type, width, height) VALUES (?, ?, ?, ?, ?)`
+	_, err := r.db.Exec(query, url, data, contentType, width, height)
+	if err != nil {
+		return fmt.Errorf("failed to save screenshot: %w", err)
+	}
+	return nil
+}
+
+func (r *ScreenshotRepository) List() (string, error) {
+	query := `
+		SELECT json_group_array(
+			json_object(
+				'id', id,
+				'url', url,
+				'data_size', length(data),
+				'content_type', content_type,
+				'width', width,
+				'height', height,
+				'created_at', created_at
+			)
+		)
+		FROM screenshots
+		ORDER BY id DESC
+	`
+
+	rows, err := r.db.Query(query)
+	if err != nil {
+		return "", fmt.Errorf("failed to list screenshots: %w", err)
+	}
+	defer rows.Close()
+
+	var jsonResult string
+	if rows.Next() {
+		if err := rows.Scan(&jsonResult); err != nil {
+			return "", fmt.Errorf("failed to scan result: %w", err)
+		}
+	}
+
+	return jsonResult, nil
+}
+
+func (r *ScreenshotRepository) Ping() error {
+	return r.db.Ping()
+}
+
+func (r *ScreenshotRepository) Close() error {
+	return r.db.Close()
 }
 
 var (
@@ -187,7 +344,7 @@ func (bl *Blocklist) IsBlocked(host string) bool {
 	return false
 }
 
-func NewServer(cfg Config, logger *slog.Logger) (*Server, error) {
+func NewServer(cfg Config, logger *slog.Logger, repo *ScreenshotRepository) (*Server, error) {
 	blocklist, err := NewBlocklist(logger)
 	if err != nil {
 		logger.Warn("failed to initialize blocklist", slog.String("error", err.Error()))
@@ -236,6 +393,7 @@ func NewServer(cfg Config, logger *slog.Logger) (*Server, error) {
 		logger:    logger,
 		blocklist: blocklist,
 		templates: templates,
+		repo:      repo,
 	}, nil
 }
 
@@ -271,6 +429,9 @@ func parseTemplates() (map[string]*template.Template, error) {
 }
 
 func (s *Server) Close() error {
+	if s.repo != nil {
+		s.repo.Close()
+	}
 	return s.browser.Close()
 }
 
@@ -282,6 +443,7 @@ func (s *Server) ServeHTTP(mux *http.ServeMux) {
 	mux.HandleFunc("GET /site.webmanifest", s.handleWebManifest)
 	mux.HandleFunc("GET /blocked", s.handleBlocked)
 	mux.HandleFunc("GET /domains.json", s.handleDomains)
+	mux.HandleFunc("GET /screenshots", s.handleScreenshots)
 	mux.HandleFunc("GET /{$}", s.handleScreenshot)
 	mux.HandleFunc("/", s.handleNotFound)
 }
@@ -313,6 +475,12 @@ func (s *Server) handleRobots(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	if s.repo != nil {
+		if err := s.repo.Ping(); err != nil {
+			http.Error(w, "database connection failed", http.StatusServiceUnavailable)
+			return
+		}
+	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Write([]byte("ok"))
 }
@@ -365,6 +533,24 @@ func (s *Server) handleDomains(w http.ResponseWriter, _ *http.Request) {
 	w.Write(data)
 }
 
+func (s *Server) handleScreenshots(w http.ResponseWriter, _ *http.Request) {
+	if s.repo == nil {
+		http.Error(w, "database not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	jsonResult, err := s.repo.List()
+	if err != nil {
+		s.logger.Error("failed to list screenshots", slog.String("error", err.Error()))
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "public, max-age=60")
+	w.Write([]byte(jsonResult))
+}
+
 func (s *Server) handleScreenshot(w http.ResponseWriter, r *http.Request) {
 	userAgent := r.Header.Get("User-Agent")
 	if s.isBot(userAgent) {
@@ -386,10 +572,22 @@ func (s *Server) handleScreenshot(w http.ResponseWriter, r *http.Request) {
 	width, height := s.parseDimensions(r)
 	fullPage := r.URL.Query().Get("full") == "true"
 
-	etag := generateETag(targetURL)
+	etag := generateETag(targetURL, width, height)
 	if r.Header.Get("If-None-Match") == etag {
 		w.WriteHeader(http.StatusNotModified)
 		return
+	}
+
+	if s.repo != nil && !fullPage {
+		if data, contentType, err := s.repo.Get(targetURL, width, height); err == nil {
+			s.logger.Info("screenshot served from cache",
+				slog.String("url", targetURL),
+				slog.Int("width", width),
+				slog.Int("height", height),
+			)
+			s.writeCachedResponse(w, data, contentType, etag)
+			return
+		}
 	}
 
 	select {
@@ -404,6 +602,12 @@ func (s *Server) handleScreenshot(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.handleCaptureError(w, targetURL, err, timing)
 		return
+	}
+
+	if s.repo != nil && !fullPage {
+		if err := s.repo.Save(targetURL, screenshot, "image/webp", width, height); err != nil {
+			s.logger.Warn("failed to cache screenshot", slog.String("url", targetURL), slog.String("error", err.Error()))
+		}
 	}
 
 	s.logger.Info("screenshot captured",
@@ -601,6 +805,17 @@ func (s *Server) writeResponse(w http.ResponseWriter, screenshot []byte, etag st
 	}
 }
 
+func (s *Server) writeCachedResponse(w http.ResponseWriter, data []byte, contentType, etag string) {
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", s.config.CacheTTLSecs))
+	w.Header().Set("ETag", etag)
+	w.Header().Set("X-Cache", "HIT")
+
+	if _, err := w.Write(data); err != nil {
+		s.logger.Error("failed to write cached response", slog.String("error", err.Error()))
+	}
+}
+
 func (s *Server) isBot(userAgent string) bool {
 	return len(userAgent) < s.config.MinUserAgentLen || botPattern.MatchString(userAgent)
 }
@@ -619,9 +834,10 @@ func extractHost(rawURL string) string {
 	return strings.ToLower(url)
 }
 
-func generateETag(url string) string {
+func generateETag(url string, width, height int) string {
 	h := fnv.New64a()
 	h.Write([]byte(url))
+	h.Write([]byte(fmt.Sprintf("%d:%d", width, height)))
 	h.Write([]byte(time.Now().Format("2006-01-02-15")))
 	return strconv.FormatUint(h.Sum64(), 36)
 }
@@ -653,7 +869,18 @@ func run() error {
 		Level: logLevel,
 	}))
 
-	srv, err := NewServer(cfg, logger)
+	dbPath := os.Getenv("DATABASE_PATH")
+	if dbPath == "" {
+		dbPath = "./data/screenshots.db?cache=shared&mode=rwc&_journal_mode=WAL"
+	}
+
+	repo, err := NewScreenshotRepository(dbPath)
+	if err != nil {
+		return fmt.Errorf("creating repository: %w", err)
+	}
+	defer repo.Close()
+
+	srv, err := NewServer(cfg, logger, repo)
 	if err != nil {
 		return fmt.Errorf("creating server: %w", err)
 	}
