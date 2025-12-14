@@ -2,5 +2,5 @@ package assets
 
 import "embed"
 
-//go:embed "filters/domains.json" "static" "templates"
+//go:embed "filters/domains.json" "static" "templates" "migrations"
 var EmbeddedFiles embed.FS
