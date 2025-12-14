@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"html/template"
 	"log/slog"
 	"net/http"
 	"os"
@@ -67,6 +68,13 @@ type Server struct {
 	config    Config
 	logger    *slog.Logger
 	blocklist *Blocklist
+	templates map[string]*template.Template
+}
+
+type PageData struct {
+	Title   string
+	Code    int
+	Message string
 }
 
 var (
@@ -186,6 +194,11 @@ func NewServer(cfg Config, logger *slog.Logger) (*Server, error) {
 		blocklist = &Blocklist{domains: make(map[string]struct{}), logger: logger}
 	}
 
+	templates, err := parseTemplates()
+	if err != nil {
+		return nil, fmt.Errorf("parsing templates: %w", err)
+	}
+
 	path, found := launcher.LookPath()
 	if !found {
 		return nil, errors.New("browser not found")
@@ -222,7 +235,39 @@ func NewServer(cfg Config, logger *slog.Logger) (*Server, error) {
 		config:    cfg,
 		logger:    logger,
 		blocklist: blocklist,
+		templates: templates,
 	}, nil
+}
+
+func parseTemplates() (map[string]*template.Template, error) {
+	templates := make(map[string]*template.Template)
+	pages := []string{"index", "404", "500", "error"}
+
+	base, err := assets.EmbeddedFiles.ReadFile("templates/base.html")
+	if err != nil {
+		return nil, err
+	}
+
+	for _, page := range pages {
+		content, err := assets.EmbeddedFiles.ReadFile("templates/" + page + ".html")
+		if err != nil {
+			return nil, err
+		}
+
+		tmpl, err := template.New("base").Parse(string(base))
+		if err != nil {
+			return nil, err
+		}
+
+		tmpl, err = tmpl.Parse(string(content))
+		if err != nil {
+			return nil, err
+		}
+
+		templates[page] = tmpl
+	}
+
+	return templates, nil
 }
 
 func (s *Server) Close() error {
@@ -242,7 +287,24 @@ func (s *Server) ServeHTTP(mux *http.ServeMux) {
 }
 
 func (s *Server) handleNotFound(w http.ResponseWriter, _ *http.Request) {
-	http.Error(w, "not found", http.StatusNotFound)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusNotFound)
+	s.templates["404"].Execute(w, PageData{Title: "404 - Not Found"})
+}
+
+func (s *Server) handleIndex(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	s.templates["index"].Execute(w, PageData{Title: "Screenshot"})
+}
+
+func (s *Server) handleError(w http.ResponseWriter, code int, message string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(code)
+	s.templates["error"].Execute(w, PageData{
+		Title:   fmt.Sprintf("%d - Error", code),
+		Code:    code,
+		Message: message,
+	})
 }
 
 func (s *Server) handleRobots(w http.ResponseWriter, _ *http.Request) {
@@ -307,13 +369,13 @@ func (s *Server) handleScreenshot(w http.ResponseWriter, r *http.Request) {
 	userAgent := r.Header.Get("User-Agent")
 	if s.isBot(userAgent) {
 		s.logger.Warn("blocked bot request", slog.String("ua", userAgent), slog.String("ip", r.RemoteAddr))
-		http.Error(w, "forbidden", http.StatusForbidden)
+		s.handleError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
 	targetURL := r.URL.Query().Get("url")
 	if targetURL == "" {
-		http.Error(w, "missing url parameter", http.StatusBadRequest)
+		s.handleIndex(w, r)
 		return
 	}
 
@@ -334,7 +396,7 @@ func (s *Server) handleScreenshot(w http.ResponseWriter, r *http.Request) {
 	case s.semaphore <- struct{}{}:
 		defer func() { <-s.semaphore }()
 	case <-r.Context().Done():
-		http.Error(w, "request cancelled", http.StatusServiceUnavailable)
+		s.handleError(w, http.StatusServiceUnavailable, "Request cancelled")
 		return
 	}
 
@@ -517,11 +579,11 @@ func (s *Server) handleCaptureError(w http.ResponseWriter, url string, err error
 	)
 
 	if strings.Contains(err.Error(), "timeout") {
-		http.Error(w, "timeout loading page", http.StatusGatewayTimeout)
+		s.handleError(w, http.StatusGatewayTimeout, "Timeout loading page")
 		return
 	}
 
-	http.Error(w, "failed to capture screenshot", http.StatusInternalServerError)
+	s.handleError(w, http.StatusInternalServerError, "Failed to capture screenshot")
 }
 
 func (s *Server) writeResponse(w http.ResponseWriter, screenshot []byte, etag string, timing Timing) {
