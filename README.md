@@ -83,7 +83,7 @@ Health check endpoint. Returns `ok` if the service is healthy.
 
 ### GET /blocked
 
-Check if a domain is in the blocklist.
+Check if a domain is in the blocklist. Returns `blocked` or `allowed` as plain text.
 
 **Parameters:**
 - `domain` (required): The domain to check
@@ -91,10 +91,10 @@ Check if a domain is in the blocklist.
 **Examples:**
 ```
 https://screenshot.jaw.dev/blocked?domain=doubleclick.net
-# {"domain":"doubleclick.net","blocked":true}
+# blocked
 
 https://screenshot.jaw.dev/blocked?domain=google.com
-# {"domain":"google.com","blocked":false}
+# allowed
 ```
 
 ### GET /domains.json

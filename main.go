@@ -230,14 +230,19 @@ func (s *Server) Close() error {
 }
 
 func (s *Server) ServeHTTP(mux *http.ServeMux) {
+	mux.Handle("GET /static/", http.FileServer(http.FS(assets.EmbeddedFiles)))
 	mux.HandleFunc("GET /robots.txt", s.handleRobots)
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /favicon.ico", s.handleFavicon)
 	mux.HandleFunc("GET /site.webmanifest", s.handleWebManifest)
 	mux.HandleFunc("GET /blocked", s.handleBlocked)
 	mux.HandleFunc("GET /domains.json", s.handleDomains)
-	mux.Handle("GET /static/", http.FileServer(http.FS(assets.EmbeddedFiles)))
-	mux.HandleFunc("GET /", s.handleScreenshot)
+	mux.HandleFunc("GET /{$}", s.handleScreenshot)
+	mux.HandleFunc("/", s.handleNotFound)
+}
+
+func (s *Server) handleNotFound(w http.ResponseWriter, _ *http.Request) {
+	http.Error(w, "not found", http.StatusNotFound)
 }
 
 func (s *Server) handleRobots(w http.ResponseWriter, _ *http.Request) {
@@ -275,13 +280,16 @@ func (s *Server) handleWebManifest(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleBlocked(w http.ResponseWriter, r *http.Request) {
 	domain := r.URL.Query().Get("domain")
 	if domain == "" {
-		http.Error(w, "missing ?domain=example.com", http.StatusBadRequest)
+		http.Error(w, "missing domain parameter", http.StatusBadRequest)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	blocked := s.blocklist.IsBlocked(domain)
-	fmt.Fprintf(w, `{"domain":%q,"blocked":%t}`, domain, blocked)
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	if s.blocklist.IsBlocked(domain) {
+		w.Write([]byte("blocked"))
+	} else {
+		w.Write([]byte("allowed"))
+	}
 }
 
 func (s *Server) handleDomains(w http.ResponseWriter, _ *http.Request) {
@@ -305,7 +313,7 @@ func (s *Server) handleScreenshot(w http.ResponseWriter, r *http.Request) {
 
 	targetURL := r.URL.Query().Get("url")
 	if targetURL == "" {
-		http.Error(w, "missing /?url=<url>", http.StatusBadRequest)
+		http.Error(w, "missing url parameter", http.StatusBadRequest)
 		return
 	}
 
@@ -512,6 +520,7 @@ func (s *Server) handleCaptureError(w http.ResponseWriter, url string, err error
 		http.Error(w, "timeout loading page", http.StatusGatewayTimeout)
 		return
 	}
+
 	http.Error(w, "failed to capture screenshot", http.StatusInternalServerError)
 }
 
