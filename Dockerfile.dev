@@ -6,7 +6,10 @@ RUN apk add --no-cache \
     freetype \
     harfbuzz \
     ca-certificates \
-    git
+    git \
+    gcc \
+    musl-dev \
+    sqlite-dev
 
 ENV ROD_CHROME_PATH=/usr/bin/chromium-browser
 
