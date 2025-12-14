@@ -1,4 +1,4 @@
-# 🌐 Screenshot
+# 🖼️ Screenshot
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/wajeht/screenshot/blob/main/LICENSE) [![Open Source Love svg1](https://badges.frapsoft.com/os/v1/open-source.svg?v=103)](https://github.com/wajeht/screenshot)
 
 automagically capture screenshots of any url
@@ -15,6 +15,58 @@ or with options:
 
 ```html
 <img loading="lazy" src="https://screenshot.jaw.dev?url=<url>&preset=twitter" />
+```
+
+or preview on hover:
+```html
+<script>
+  document.addEventListener("DOMContentLoaded", () => {
+    const preview = document.querySelector(".preview");
+    const img = preview.querySelector(".preview-window");
+
+    preview.addEventListener("mouseenter", () => {
+      img.style.display = "block";
+    });
+
+    preview.addEventListener("mouseleave", () => {
+      img.style.display = "none";
+    });
+  });
+</script>
+
+<div class="preview">
+  <a href="https://github.com/">Github</a>
+  <img
+    class="preview-window"
+    src="https://screenshot.jaw.dev?url=https://github.com/"
+    loading="lazy"
+    alt="Preview"
+  />
+</div>
+
+<style>
+  .preview {
+    position: relative;
+    display: inline-block;
+  }
+
+  .preview-window {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    display: none;
+
+    max-height: 200px;
+    max-width: 300px;
+
+    width: 300px;
+    height: auto;
+
+    overflow: hidden;
+    border: 1px solid #ccc;
+    background: #fff;
+  }
+</style>
 ```
 
 ## How it works
