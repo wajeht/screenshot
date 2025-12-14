@@ -7,7 +7,7 @@
 <article>
     <section>
         <h2>Basic Usage</h2>
-        <pre><code>&lt;img src="https://screenshot.jaw.dev?url=https://github.com" /&gt;</code></pre>
+        <pre><code>&lt;img loading="lazy" src="https://screenshot.jaw.dev?url=https://github.com" /&gt;</code></pre>
     </section>
 
     <section>
@@ -60,6 +60,23 @@
     background: #fff;
   }
 &lt;/style&gt;</code></pre>
+    </section>
+
+    <section>
+        <h2>Demo</h2>
+        <p>Hover over the link to preview: <span class="demo-preview"><a href="https://github.com/">github.com</a><img class="demo-preview-img" src="/?url=https://github.com/" loading="lazy" alt="Preview"></span></p>
+        <style>
+            .demo-preview { position: relative; }
+            .demo-preview-img { position: absolute; top: 100%; left: 0; display: none; width: 300px; height: auto; border: 1px solid #ccc; }
+        </style>
+        <script>
+            document.addEventListener("DOMContentLoaded", () => {
+                const preview = document.querySelector(".demo-preview");
+                const img = preview.querySelector(".demo-preview-img");
+                preview.addEventListener("mouseenter", () => { img.style.display = "block"; });
+                preview.addEventListener("mouseleave", () => { img.style.display = "none"; });
+            });
+        </script>
     </section>
 
     <section>

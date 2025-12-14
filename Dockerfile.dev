@@ -22,5 +22,5 @@ CMD ["go", "run", "github.com/cosmtrek/air@v1.43.0", \
     "--build.bin", "./screenshot", \
     "--build.delay", "100", \
     "--build.exclude_dir", "", \
-    "--build.include_ext", "go", \
+    "--build.include_ext", "go,html", \
     "--misc.clean_on_exit", "true"]
