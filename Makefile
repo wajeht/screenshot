@@ -18,7 +18,7 @@ format:
 
 push: format test
 	@git add .
-	@curl -s https://commit.jaw.dev/ | sh -s -- -ai openai
+	@curl -s https://commit.jaw.dev/ | sh -s --  --no-verify -ai openai
 
 clean:
 	@docker ps -a --filter "ancestor=$(NAME)" -q | xargs -r docker stop || true
