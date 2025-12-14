@@ -167,9 +167,21 @@ Returns the full list of blocked domains as JSON array (~102k domains).
 
 ### GET /screenshots
 
-Returns a list of all cached screenshots as JSON.
+Displays a list of all cached screenshots. Returns an HTML table by default, or JSON with `?format=json`.
 
-**Response:**
+**Parameters:**
+- `format` (optional): Set to `json` for JSON response
+
+**Examples:**
+```
+https://screenshot.jaw.dev/screenshots
+# HTML table with preview images
+
+https://screenshot.jaw.dev/screenshots?format=json
+# JSON response
+```
+
+**JSON Response:**
 ```json
 [
   {
