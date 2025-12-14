@@ -92,7 +92,7 @@ or preview on hover:
 
 ### GET /
 
-Captures a screenshot of the given URL.
+Without parameters, displays the documentation page. With `url` parameter, captures a screenshot.
 
 **Parameters:**
 - `url` (required): The URL to screenshot
