@@ -13,7 +13,7 @@ COPY . .
 RUN CGO_ENABLED=1 go build -o screenshot . && \
     ls -la /app/screenshot
 
-FROM alpine:latest
+FROM alpine:3.21
 
 RUN apk --no-cache add \
     ca-certificates \
