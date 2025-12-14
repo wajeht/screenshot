@@ -16,6 +16,10 @@ test:
 format:
 	@go fmt ./...
 
+push: format test
+	@git add .
+	@curl -s https://commit.jaw.dev/ | sh -s -- -ai openai
+
 clean:
 	@docker ps -a --filter "ancestor=$(NAME)" -q | xargs -r docker stop || true
 	@docker ps -a --filter "ancestor=$(NAME)" -q | xargs -r docker rm || true
