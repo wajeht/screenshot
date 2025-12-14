@@ -129,6 +129,21 @@ type PageData struct {
 	Message string
 }
 
+type ScreenshotEntry struct {
+	ID          int    `json:"id"`
+	URL         string `json:"url"`
+	DataSize    int    `json:"data_size"`
+	ContentType string `json:"content_type"`
+	Width       int    `json:"width"`
+	Height      int    `json:"height"`
+	CreatedAt   string `json:"created_at"`
+}
+
+type ScreenshotsPageData struct {
+	Title       string
+	Screenshots []ScreenshotEntry
+}
+
 type Blocklist struct {
 	domains map[string]struct{}
 	mu      sync.RWMutex
@@ -487,7 +502,7 @@ func (s *Server) handleDomains(w http.ResponseWriter, _ *http.Request) {
 	w.Write(data)
 }
 
-func (s *Server) handleScreenshots(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleScreenshots(w http.ResponseWriter, r *http.Request) {
 	if s.repo == nil {
 		http.Error(w, "database not configured", http.StatusServiceUnavailable)
 		return
@@ -500,9 +515,26 @@ func (s *Server) handleScreenshots(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	if r.URL.Query().Get("format") == "json" {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", screenshotsCacheTTL))
+		w.Write([]byte(jsonResult))
+		return
+	}
+
+	var screenshots []ScreenshotEntry
+	if err := json.Unmarshal([]byte(jsonResult), &screenshots); err != nil {
+		s.logger.Error("failed to parse screenshots", slog.String("error", err.Error()))
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", screenshotsCacheTTL))
-	w.Write([]byte(jsonResult))
+	s.templates["screenshots"].Execute(w, ScreenshotsPageData{
+		Title:       "Screenshots",
+		Screenshots: screenshots,
+	})
 }
 
 func (s *Server) handleScreenshot(w http.ResponseWriter, r *http.Request) {
@@ -810,7 +842,7 @@ func runMigrations(db *sql.DB) error {
 
 func parseTemplates() (map[string]*template.Template, error) {
 	templates := make(map[string]*template.Template)
-	pages := []string{"index", "404", "500", "error"}
+	pages := []string{"index", "404", "500", "error", "screenshots"}
 
 	base, err := assets.EmbeddedFiles.ReadFile("templates/base.html")
 	if err != nil {
