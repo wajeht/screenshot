@@ -1,0 +1,31 @@
+{{define "content"}}
+<header>
+    <h1>🖼️ Screenshots</h1>
+    <p>Cached screenshots ({{len .Screenshots}} total)</p>
+</header>
+
+<table style="border-collapse: collapse;" border="1">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Preview</th>
+            <th>URL</th>
+            <th>Size</th>
+            <th>Dimensions</th>
+            <th>Created</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .Screenshots}}
+        <tr>
+            <td>{{.ID}}</td>
+            <td><img loading="lazy" src="/?url={{.URL}}&width={{.Width}}&height={{.Height}}" alt="screenshot" width="100"></td>
+            <td style="word-break: break-all;"><a href="{{.URL}}" target="_blank">{{.URL}}</a></td>
+            <td>{{.DataSize}} bytes</td>
+            <td>{{.Width}}x{{.Height}}</td>
+            <td>{{.CreatedAt}}</td>
+        </tr>
+        {{end}}
+    </tbody>
+</table>
+{{end}}
