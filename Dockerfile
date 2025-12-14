@@ -5,28 +5,36 @@ RUN apk add --no-cache gcc musl-dev sqlite-dev
 WORKDIR /app
 
 COPY go.mod go.sum ./
+
 RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o screenshot
+RUN CGO_ENABLED=1 go build -o screenshot . && \
+    ls -la /app/screenshot
 
-FROM alpine:3.20
+FROM alpine:latest
 
-RUN apk add --no-cache \
+RUN apk --no-cache add \
+    ca-certificates \
+    sqlite \
     chromium \
     nss \
     freetype \
-    harfbuzz \
-    ca-certificates \
-    sqlite-libs \
-    && adduser -D roduser
+    harfbuzz
+
+RUN addgroup -g 1001 -S screenshot && adduser -S screenshot -u 1001 -G screenshot
 
 WORKDIR /app
-COPY --from=builder /app/screenshot .
-RUN mkdir -p /app/data && chown -R roduser:roduser /app/data
 
-USER roduser
+RUN mkdir -p ./data && chown screenshot:screenshot ./data
+
+COPY --chown=screenshot:screenshot --from=builder /app/screenshot ./screenshot
+
+RUN ls -la /app/ && \
+    chmod +x /app/screenshot
+
+USER screenshot
 
 ENV ROD_CHROME_PATH=/usr/bin/chromium-browser
 ENV APP_ENV=production
@@ -34,7 +42,7 @@ ENV APP_PORT=80
 
 EXPOSE 80
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:80/healthz || exit 1
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost/healthz || exit 1
 
 CMD ["./screenshot"]
