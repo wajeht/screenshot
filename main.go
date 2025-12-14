@@ -30,6 +30,68 @@ import (
 	"github.com/wajeht/screenshot/assets"
 )
 
+const (
+	maxOpenConns    = 100
+	maxIdleDBConns  = 25
+	connMaxLifetime = 5 * time.Minute
+)
+
+const (
+	defaultPort         = "80"
+	defaultEnv          = "development"
+	pageTimeout         = 30 * time.Second
+	screenshotQuality   = 50
+	cacheTTL            = 300
+	maxWidth            = 1920
+	maxHeight           = 1920
+	maxConcurrent       = 10
+	shutdownTimeout     = 30 * time.Second
+	readTimeout         = 5 * time.Second
+	writeTimeout        = 60 * time.Second
+	idleTimeout         = 120 * time.Second
+	minUserAgentLen     = 20
+	staticCacheTTL      = 86400
+	screenshotsCacheTTL = 60
+)
+
+var (
+	ErrNotFound       = errors.New("screenshot not found")
+	ErrBrowserMissing = errors.New("browser not found")
+)
+
+var botPattern = regexp.MustCompile(`(?i)bot|crawler|spider|crawling|googlebot|bingbot|yandex|baidu|duckduckbot|slurp|ia_archiver|facebookexternalhit|twitterbot|linkedinbot|embedly|quora|pinterest|slackbot|discordbot|telegrambot|whatsapp|applebot|semrush|ahref|mj12bot|dotbot|petalbot|curl|wget|python|httpie|postman|insomnia|java|ruby|perl|php|go-http-client|scrapy|httpclient|apache-http|okhttp`)
+
+var presets = map[string]Dimension{
+	"thumb":   {Width: 800, Height: 420},
+	"og":      {Width: 1200, Height: 630},
+	"twitter": {Width: 1200, Height: 675},
+	"square":  {Width: 1080, Height: 1080},
+	"mobile":  {Width: 375, Height: 667},
+	"desktop": {Width: 1920, Height: 1080},
+}
+
+var blockedExtensions = map[string]struct{}{
+	".mp4": {}, ".webm": {}, ".mp3": {}, ".wav": {}, ".ogg": {},
+	".ico": {}, ".webmanifest": {},
+}
+
+var blockedPaths = []string{
+	"apple-touch-icon",
+	"android-chrome",
+	"manifest.json",
+}
+
+var criticalDomains = []string{
+	"google-analytics.com", "googletagmanager.com", "hotjar.com",
+	"mixpanel.com", "segment.io", "newrelic.com", "nr-data.net", "sentry.io",
+	"doubleclick.net", "googlesyndication.com", "adservice.google.com",
+	"facebook.net", "ads.linkedin.com", "accounts.google.com",
+	"platform.linkedin.com", "connect.facebook.net", "ponf.linkedin.com",
+	"px.ads.linkedin.com", "bat.bing.com", "tr.snapchat.com",
+	"li.protechts.net", "challenges.cloudflare.com",
+	"intercom.io", "crisp.chat", "drift.com", "zendesk.com",
+}
+
 type Config struct {
 	Port            string
 	PageTimeout     time.Duration
@@ -61,10 +123,20 @@ type Timing struct {
 	Total      time.Duration
 }
 
+type PageData struct {
+	Title   string
+	Code    int
+	Message string
+}
+
 type Blocklist struct {
 	domains map[string]struct{}
 	mu      sync.RWMutex
 	logger  *slog.Logger
+}
+
+type ScreenshotRepository struct {
+	db *sql.DB
 }
 
 type Server struct {
@@ -77,34 +149,41 @@ type Server struct {
 	repo      *ScreenshotRepository
 }
 
-type PageData struct {
-	Title   string
-	Code    int
-	Message string
+func DefaultConfig() Config {
+	port := os.Getenv("APP_PORT")
+	if port == "" {
+		port = defaultPort
+	}
+
+	env := os.Getenv("APP_ENV")
+	if env == "" {
+		env = defaultEnv
+	}
+
+	return Config{
+		Port:            ":" + port,
+		PageTimeout:     pageTimeout,
+		ScreenshotQual:  screenshotQuality,
+		CacheTTLSecs:    cacheTTL,
+		MaxWidth:        maxWidth,
+		MaxHeight:       maxHeight,
+		MaxConcurrent:   maxConcurrent,
+		ShutdownTimeout: shutdownTimeout,
+		ReadTimeout:     readTimeout,
+		WriteTimeout:    writeTimeout,
+		IdleTimeout:     idleTimeout,
+		MinUserAgentLen: minUserAgentLen,
+		Debug:           env != "production",
+		BlockFonts:      true,
+		BlockMedia:      true,
+	}
 }
-
-type ScreenshotRepository struct {
-	db *sql.DB
-}
-
-const (
-	maxOpenConns    = 100
-	maxIdleDBConns  = 25
-	connMaxLifetime = 5 * time.Minute
-)
-
-var ErrNotFound = errors.New("screenshot not found")
 
 func NewScreenshotRepository(dbPath string) (*ScreenshotRepository, error) {
 	path := strings.Split(dbPath, "?")[0]
 	dir := filepath.Dir(path)
 
-	dbExists := false
-	if _, err := os.Stat(path); err == nil {
-		dbExists = true
-	}
-
-	if !dbExists {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return nil, fmt.Errorf("failed to create database directory: %w", err)
 		}
@@ -135,38 +214,6 @@ func NewScreenshotRepository(dbPath string) (*ScreenshotRepository, error) {
 	}
 
 	return &ScreenshotRepository{db: db}, nil
-}
-
-func applyPragmas(db *sql.DB) error {
-	pragmas := []string{
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA synchronous=NORMAL",
-		"PRAGMA cache_size=10000",
-		"PRAGMA temp_store=MEMORY",
-		"PRAGMA mmap_size=268435456",
-	}
-
-	for _, pragma := range pragmas {
-		if _, err := db.Exec(pragma); err != nil {
-			log.Printf("Warning: Failed to set pragma %s: %v", pragma, err)
-		}
-	}
-
-	return nil
-}
-
-func runMigrations(db *sql.DB) error {
-	goose.SetBaseFS(assets.EmbeddedFiles)
-
-	if err := goose.SetDialect("sqlite3"); err != nil {
-		return fmt.Errorf("failed to set goose dialect: %w", err)
-	}
-
-	if err := goose.Up(db, "migrations"); err != nil {
-		return fmt.Errorf("failed to run migrations: %w", err)
-	}
-
-	return nil
 }
 
 func (r *ScreenshotRepository) Get(url string, width, height int) ([]byte, string, error) {
@@ -235,69 +282,6 @@ func (r *ScreenshotRepository) Close() error {
 	return r.db.Close()
 }
 
-var (
-	presets = map[string]Dimension{
-		"thumb":   {800, 420},
-		"og":      {1200, 630},
-		"twitter": {1200, 675},
-		"square":  {1080, 1080},
-		"mobile":  {375, 667},
-		"desktop": {1920, 1080},
-	}
-
-	botPattern = regexp.MustCompile(`(?i)bot|crawler|spider|crawling|googlebot|bingbot|yandex|baidu|duckduckbot|slurp|ia_archiver|facebookexternalhit|twitterbot|linkedinbot|embedly|quora|pinterest|slackbot|discordbot|telegrambot|whatsapp|applebot|semrush|ahref|mj12bot|dotbot|petalbot|curl|wget|python|httpie|postman|insomnia|java|ruby|perl|php|go-http-client|scrapy|httpclient|apache-http|okhttp`)
-
-	blockedExtensions = map[string]struct{}{
-		".mp4": {}, ".webm": {}, ".mp3": {}, ".wav": {}, ".ogg": {},
-		".ico": {}, ".webmanifest": {},
-	}
-
-	blockedPaths = []string{"apple-touch-icon", "android-chrome", "manifest.json"}
-
-	criticalDomains = []string{
-		"google-analytics.com", "googletagmanager.com", "hotjar.com",
-		"mixpanel.com", "segment.io", "newrelic.com", "nr-data.net", "sentry.io",
-		"doubleclick.net", "googlesyndication.com", "adservice.google.com",
-		"facebook.net", "ads.linkedin.com", "accounts.google.com",
-		"platform.linkedin.com", "connect.facebook.net", "ponf.linkedin.com",
-		"px.ads.linkedin.com", "bat.bing.com", "tr.snapchat.com",
-		"li.protechts.net", "challenges.cloudflare.com",
-		"intercom.io", "crisp.chat", "drift.com", "zendesk.com",
-	}
-)
-
-func DefaultConfig() Config {
-	port := os.Getenv("APP_PORT")
-	if port == "" {
-		port = "80"
-	}
-
-	env := os.Getenv("APP_ENV")
-	if env == "" {
-		env = "development"
-	}
-
-	debug := env != "production"
-
-	return Config{
-		Port:            ":" + port,
-		PageTimeout:     30 * time.Second,
-		ScreenshotQual:  50,
-		CacheTTLSecs:    300,
-		MaxWidth:        1920,
-		MaxHeight:       1920,
-		MaxConcurrent:   10,
-		ShutdownTimeout: 30 * time.Second,
-		ReadTimeout:     5 * time.Second,
-		WriteTimeout:    60 * time.Second,
-		IdleTimeout:     120 * time.Second,
-		MinUserAgentLen: 20,
-		Debug:           debug,
-		BlockFonts:      true,
-		BlockMedia:      true,
-	}
-}
-
 func NewBlocklist(logger *slog.Logger) (*Blocklist, error) {
 	bl := &Blocklist{
 		domains: make(map[string]struct{}),
@@ -359,7 +343,7 @@ func NewServer(cfg Config, logger *slog.Logger, repo *ScreenshotRepository) (*Se
 
 	path, found := launcher.LookPath()
 	if !found {
-		return nil, errors.New("browser not found")
+		return nil, ErrBrowserMissing
 	}
 
 	url := launcher.New().
@@ -396,37 +380,6 @@ func NewServer(cfg Config, logger *slog.Logger, repo *ScreenshotRepository) (*Se
 		templates: templates,
 		repo:      repo,
 	}, nil
-}
-
-func parseTemplates() (map[string]*template.Template, error) {
-	templates := make(map[string]*template.Template)
-	pages := []string{"index", "404", "500", "error"}
-
-	base, err := assets.EmbeddedFiles.ReadFile("templates/base.html")
-	if err != nil {
-		return nil, err
-	}
-
-	for _, page := range pages {
-		content, err := assets.EmbeddedFiles.ReadFile("templates/" + page + ".html")
-		if err != nil {
-			return nil, err
-		}
-
-		tmpl, err := template.New("base").Parse(string(base))
-		if err != nil {
-			return nil, err
-		}
-
-		tmpl, err = tmpl.Parse(string(content))
-		if err != nil {
-			return nil, err
-		}
-
-		templates[page] = tmpl
-	}
-
-	return templates, nil
 }
 
 func (s *Server) Close() error {
@@ -493,7 +446,7 @@ func (s *Server) handleFavicon(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "image/x-icon")
-	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", staticCacheTTL))
 	w.Write(data)
 }
 
@@ -504,7 +457,7 @@ func (s *Server) handleWebManifest(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/manifest+json")
-	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", staticCacheTTL))
 	w.Write(data)
 }
 
@@ -530,7 +483,7 @@ func (s *Server) handleDomains(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", staticCacheTTL))
 	w.Write(data)
 }
 
@@ -548,7 +501,7 @@ func (s *Server) handleScreenshots(w http.ResponseWriter, _ *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "public, max-age=60")
+	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", screenshotsCacheTTL))
 	w.Write([]byte(jsonResult))
 }
 
@@ -624,14 +577,15 @@ func (s *Server) handleScreenshot(w http.ResponseWriter, r *http.Request) {
 	s.writeResponse(w, screenshot, etag, timing)
 }
 
-func (s *Server) parseDimensions(r *http.Request) (width, height int) {
+func (s *Server) parseDimensions(r *http.Request) (int, int) {
 	dim := presets["thumb"]
 	if preset := r.URL.Query().Get("preset"); preset != "" {
 		if p, ok := presets[preset]; ok {
 			dim = p
 		}
 	}
-	width, height = dim.Width, dim.Height
+
+	width, height := dim.Width, dim.Height
 
 	if r.URL.Query().Get("width") != "" {
 		width = parseIntParam(r, "width", width, s.config.MaxWidth)
@@ -639,6 +593,7 @@ func (s *Server) parseDimensions(r *http.Request) (width, height int) {
 	if r.URL.Query().Get("height") != "" {
 		height = parseIntParam(r, "height", height, s.config.MaxHeight)
 	}
+
 	return width, height
 }
 
@@ -821,18 +776,81 @@ func (s *Server) isBot(userAgent string) bool {
 	return len(userAgent) < s.config.MinUserAgentLen || botPattern.MatchString(userAgent)
 }
 
+func applyPragmas(db *sql.DB) error {
+	pragmas := []string{
+		"PRAGMA journal_mode=WAL",
+		"PRAGMA synchronous=NORMAL",
+		"PRAGMA cache_size=10000",
+		"PRAGMA temp_store=MEMORY",
+		"PRAGMA mmap_size=268435456",
+	}
+
+	for _, pragma := range pragmas {
+		if _, err := db.Exec(pragma); err != nil {
+			log.Printf("Warning: Failed to set pragma %s: %v", pragma, err)
+		}
+	}
+
+	return nil
+}
+
+func runMigrations(db *sql.DB) error {
+	goose.SetBaseFS(assets.EmbeddedFiles)
+
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		return fmt.Errorf("failed to set goose dialect: %w", err)
+	}
+
+	if err := goose.Up(db, "migrations"); err != nil {
+		return fmt.Errorf("failed to run migrations: %w", err)
+	}
+
+	return nil
+}
+
+func parseTemplates() (map[string]*template.Template, error) {
+	templates := make(map[string]*template.Template)
+	pages := []string{"index", "404", "500", "error"}
+
+	base, err := assets.EmbeddedFiles.ReadFile("templates/base.html")
+	if err != nil {
+		return nil, fmt.Errorf("reading base template: %w", err)
+	}
+
+	for _, page := range pages {
+		content, err := assets.EmbeddedFiles.ReadFile("templates/" + page + ".html")
+		if err != nil {
+			return nil, fmt.Errorf("reading %s template: %w", page, err)
+		}
+
+		tmpl, err := template.New("base").Parse(string(base))
+		if err != nil {
+			return nil, fmt.Errorf("parsing base template: %w", err)
+		}
+
+		tmpl, err = tmpl.Parse(string(content))
+		if err != nil {
+			return nil, fmt.Errorf("parsing %s template: %w", page, err)
+		}
+
+		templates[page] = tmpl
+	}
+
+	return templates, nil
+}
+
 func extractHost(rawURL string) string {
-	url := rawURL
-	if idx := strings.Index(url, "://"); idx != -1 {
-		url = url[idx+3:]
+	u := rawURL
+	if idx := strings.Index(u, "://"); idx != -1 {
+		u = u[idx+3:]
 	}
-	if idx := strings.IndexByte(url, '/'); idx != -1 {
-		url = url[:idx]
+	if idx := strings.IndexByte(u, '/'); idx != -1 {
+		u = u[:idx]
 	}
-	if idx := strings.IndexByte(url, ':'); idx != -1 {
-		url = url[:idx]
+	if idx := strings.IndexByte(u, ':'); idx != -1 {
+		u = u[:idx]
 	}
-	return strings.ToLower(url)
+	return strings.ToLower(u)
 }
 
 func generateETag(url string, width, height int) string {
