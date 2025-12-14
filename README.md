@@ -19,54 +19,62 @@ or with options:
 
 or preview on hover:
 ```html
-<script>
-  document.addEventListener("DOMContentLoaded", () => {
-    const preview = document.querySelector(".preview");
-    const img = preview.querySelector(".preview-window");
-
-    preview.addEventListener("mouseenter", () => {
-      img.style.display = "block";
-    });
-
-    preview.addEventListener("mouseleave", () => {
-      img.style.display = "none";
-    });
-  });
-</script>
-
-<div class="preview">
+<span class="preview">
   <a href="https://github.com/">Github</a>
   <img
-    class="preview-window"
+    class="preview-img"
     src="https://screenshot.jaw.dev?url=https://github.com/"
     loading="lazy"
     alt="Preview"
-  />
-</div>
+  >
+</span>
 
 <style>
   .preview {
     position: relative;
-    display: inline-block;
   }
 
-  .preview-window {
+  .preview-img {
     position: absolute;
     top: 100%;
     left: 0;
     display: none;
-
-    max-height: 200px;
-    max-width: 300px;
-
     width: 300px;
-    height: auto;
-
-    overflow: hidden;
+    height: 158px;
     border: 1px solid #ccc;
+    object-fit: cover;
     background: #fff;
   }
+
+  .preview.loading::after {
+    content: "Loading...";
+    position: absolute;
+    top: calc(100% + 70px);
+    left: 110px;
+    color: #666;
+  }
 </style>
+
+<script>
+  document.addEventListener("DOMContentLoaded", () => {
+    const preview = document.querySelector(".preview");
+    const img = preview.querySelector(".preview-img");
+
+    preview.addEventListener("mouseenter", () => {
+      img.style.display = "block";
+      if (!img.complete) preview.classList.add("loading");
+    });
+
+    preview.addEventListener("mouseleave", () => {
+      img.style.display = "none";
+      preview.classList.remove("loading");
+    });
+
+    img.onload = () => {
+      preview.classList.remove("loading");
+    };
+  });
+</script>
 ```
 
 ## How it works
