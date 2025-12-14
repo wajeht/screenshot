@@ -1,5 +1,7 @@
 FROM golang:1.25-alpine AS builder
 
+RUN apk add --no-cache gcc musl-dev sqlite-dev
+
 WORKDIR /app
 
 COPY go.mod go.sum ./
@@ -7,7 +9,7 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o screenshot
+RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o screenshot
 
 FROM alpine:3.20
 
@@ -17,12 +19,14 @@ RUN apk add --no-cache \
     freetype \
     harfbuzz \
     ca-certificates \
+    sqlite-libs \
     && adduser -D roduser
-
-USER roduser
 
 WORKDIR /app
 COPY --from=builder /app/screenshot .
+RUN mkdir -p /app/data && chown -R roduser:roduser /app/data
+
+USER roduser
 
 ENV ROD_CHROME_PATH=/usr/bin/chromium-browser
 ENV APP_ENV=production
