@@ -20,10 +20,10 @@ or with options:
 or preview on hover:
 ```html
 <span class="preview">
-  <a href="https://github.com/">Github</a>
+  <a href="https://github.com/wajeht/screenshot">Github</a>
   <img
     class="preview-img"
-    src="https://screenshot.jaw.dev?url=https://github.com/"
+    src="https://screenshot.jaw.dev?url=https://github.com/wajeht/screenshot"
     loading="lazy"
     alt="Preview"
   >
@@ -169,4 +169,3 @@ Returns the full list of blocked domains as JSON array (~102k domains).
 ## 📜 License
 
 Distributed under the MIT License © [wajeht](https://github.com/wajeht). See [LICENSE](./LICENSE) for more information.
-
