@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"html/template"
+	"log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -88,7 +89,7 @@ type ScreenshotRepository struct {
 
 const (
 	maxOpenConns    = 100
-	maxIdleConns    = 25
+	maxIdleDBConns  = 25
 	connMaxLifetime = 5 * time.Minute
 )
 
@@ -115,7 +116,7 @@ func NewScreenshotRepository(dbPath string) (*ScreenshotRepository, error) {
 	}
 
 	db.SetMaxOpenConns(maxOpenConns)
-	db.SetMaxIdleConns(maxIdleConns)
+	db.SetMaxIdleConns(maxIdleDBConns)
 	db.SetConnMaxLifetime(connMaxLifetime)
 
 	if err := db.Ping(); err != nil {
@@ -147,7 +148,7 @@ func applyPragmas(db *sql.DB) error {
 
 	for _, pragma := range pragmas {
 		if _, err := db.Exec(pragma); err != nil {
-			slog.Warn("failed to set pragma", slog.String("pragma", pragma), slog.String("error", err.Error()))
+			log.Printf("Warning: Failed to set pragma %s: %v", pragma, err)
 		}
 	}
 
@@ -869,12 +870,7 @@ func run() error {
 		Level: logLevel,
 	}))
 
-	dbPath := os.Getenv("DATABASE_PATH")
-	if dbPath == "" {
-		dbPath = "./data/screenshots.db?cache=shared&mode=rwc&_journal_mode=WAL"
-	}
-
-	repo, err := NewScreenshotRepository(dbPath)
+	repo, err := NewScreenshotRepository("./data/db.sqlite?cache=shared&mode=rwc&_journal_mode=WAL")
 	if err != nil {
 		return fmt.Errorf("creating repository: %w", err)
 	}
