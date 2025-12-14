@@ -86,9 +86,12 @@ or preview on hover:
    - Captures the screenshot as WebP
 
 2. **Caching**:
+   - Screenshots are cached in SQLite database
+   - Subsequent requests for the same URL/dimensions are served from cache
    - Supports ETag-based browser caching
    - Cache TTL of 5 minutes (300 seconds)
    - Returns `304 Not Modified` for cached requests
+   - `X-Cache: HIT` header indicates cache hit
 
 3. **Performance Optimizations**:
    - Concurrent request limiting (max 10 simultaneous)
@@ -127,6 +130,7 @@ https://screenshot.jaw.dev?url=github.com&full=true
 - `Content-Type`: image/webp
 - `Cache-Control`: public, max-age=300
 - `ETag`: Hash-based cache identifier
+- `X-Cache`: HIT (when served from database cache)
 - `X-Setup-Ms`: Browser setup time
 - `X-Nav-Ms`: Navigation time
 - `X-Load-Ms`: Page load time
@@ -160,6 +164,25 @@ https://screenshot.jaw.dev/blocked?domain=google.com
 ### GET /domains.json
 
 Returns the full list of blocked domains as JSON array (~102k domains).
+
+### GET /screenshots
+
+Returns a list of all cached screenshots as JSON.
+
+**Response:**
+```json
+[
+  {
+    "id": 1,
+    "url": "https://github.com",
+    "data_size": 45678,
+    "content_type": "image/webp",
+    "width": 800,
+    "height": 420,
+    "created_at": "2025-01-15 10:30:00"
+  }
+]
+```
 
 ## 📑 Docs
 
