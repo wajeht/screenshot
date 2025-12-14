@@ -1,0 +1,93 @@
+{{define "content"}}
+<header>
+    <h1>🖼️ Screenshot</h1>
+    <p>Capture screenshots of any URL.</p>
+</header>
+
+<article>
+    <section>
+        <h2>Basic Usage</h2>
+        <pre><code>&lt;img src="https://screenshot.jaw.dev?url=https://github.com" /&gt;</code></pre>
+    </section>
+
+    <section>
+        <h2>Preview on Hover</h2>
+        <pre><code>&lt;script&gt;
+  document.addEventListener("DOMContentLoaded", () =&gt; {
+    const preview = document.querySelector(".preview");
+    const img = preview.querySelector(".preview-window");
+
+    preview.addEventListener("mouseenter", () =&gt; {
+      img.style.display = "block";
+    });
+
+    preview.addEventListener("mouseleave", () =&gt; {
+      img.style.display = "none";
+    });
+  });
+&lt;/script&gt;
+
+&lt;div class="preview"&gt;
+  &lt;a href="https://github.com/"&gt;Github&lt;/a&gt;
+  &lt;img
+    class="preview-window"
+    src="https://screenshot.jaw.dev?url=https://github.com/"
+    loading="lazy"
+    alt="Preview"
+  /&gt;
+&lt;/div&gt;
+
+&lt;style&gt;
+  .preview {
+    position: relative;
+    display: inline-block;
+  }
+
+  .preview-window {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    display: none;
+
+    max-height: 200px;
+    max-width: 300px;
+
+    width: 300px;
+    height: auto;
+
+    overflow: hidden;
+    border: 1px solid #ccc;
+    background: #fff;
+  }
+&lt;/style&gt;</code></pre>
+    </section>
+
+    <section>
+        <h2>Options</h2>
+        <dl>
+            <dt><code>url</code></dt>
+            <dd>URL to screenshot (required)</dd>
+
+            <dt><code>preset</code></dt>
+            <dd>thumb, og, twitter, square, mobile, desktop</dd>
+
+            <dt><code>width</code></dt>
+            <dd>custom width (max 1920)</dd>
+
+            <dt><code>height</code></dt>
+            <dd>custom height (max 1920)</dd>
+
+            <dt><code>full</code></dt>
+            <dd>set to true for full page</dd>
+        </dl>
+    </section>
+
+    <section>
+        <h2>Examples</h2>
+        <pre><code>/?url=github.com
+/?url=github.com&amp;preset=twitter
+/?url=github.com&amp;width=800&amp;height=600
+/?url=github.com&amp;full=true</code></pre>
+    </section>
+</article>
+{{end}}
