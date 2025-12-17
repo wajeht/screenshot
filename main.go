@@ -39,10 +39,10 @@ const (
 )
 
 const (
-	defaultPort     = "80"
-	defaultEnv      = "development"
-	defaultPassword = ""
-	pageTimeout     = 30 * time.Second
+	defaultPort         = "80"
+	defaultEnv          = "development"
+	defaultPassword     = ""
+	pageTimeout         = 30 * time.Second
 	screenshotQuality   = 50
 	cacheTTL            = 300
 	maxWidth            = 1920
@@ -111,7 +111,7 @@ type Config struct {
 	Debug           bool
 	BlockFonts      bool
 	BlockMedia      bool
-	Password string
+	Password        string
 }
 
 type Dimension struct {
