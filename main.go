@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,9 +39,10 @@ const (
 )
 
 const (
-	defaultPort         = "80"
-	defaultEnv          = "development"
-	pageTimeout         = 30 * time.Second
+	defaultPort     = "80"
+	defaultEnv      = "development"
+	defaultPassword = ""
+	pageTimeout     = 30 * time.Second
 	screenshotQuality   = 50
 	cacheTTL            = 300
 	maxWidth            = 1920
@@ -108,6 +111,7 @@ type Config struct {
 	Debug           bool
 	BlockFonts      bool
 	BlockMedia      bool
+	Password string
 }
 
 type Dimension struct {
@@ -175,6 +179,11 @@ func DefaultConfig() Config {
 		env = defaultEnv
 	}
 
+	password := os.Getenv("APP_PASSWORD")
+	if password == "" {
+		password = defaultPassword
+	}
+
 	return Config{
 		Port:            ":" + port,
 		PageTimeout:     pageTimeout,
@@ -191,6 +200,7 @@ func DefaultConfig() Config {
 		Debug:           env != "production",
 		BlockFonts:      true,
 		BlockMedia:      true,
+		Password:        password,
 	}
 }
 
@@ -411,8 +421,8 @@ func (s *Server) ServeHTTP(mux *http.ServeMux) {
 	mux.HandleFunc("GET /favicon.ico", s.handleFavicon)
 	mux.HandleFunc("GET /site.webmanifest", s.handleWebManifest)
 	mux.HandleFunc("GET /blocked", s.handleBlocked)
-	mux.HandleFunc("GET /domains.json", s.handleDomains)
-	mux.HandleFunc("GET /screenshots", s.handleScreenshots)
+	mux.HandleFunc("GET /domains.json", s.basicAuth(s.handleDomains))
+	mux.HandleFunc("GET /screenshots", s.basicAuth(s.handleScreenshots))
 	mux.HandleFunc("GET /{$}", s.handleScreenshot)
 	mux.HandleFunc("/", s.handleNotFound)
 }
@@ -808,6 +818,32 @@ func (s *Server) isBot(userAgent string) bool {
 	return len(userAgent) < s.config.MinUserAgentLen || botPattern.MatchString(userAgent)
 }
 
+func generateRandomString(length int) string {
+	bytes := make([]byte, length)
+	if _, err := rand.Read(bytes); err != nil {
+		return "admin" + fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(bytes)[:length]
+}
+
+func (s *Server) basicAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.config.Password == "" {
+			next(w, r)
+			return
+		}
+
+		_, pass, ok := r.BasicAuth()
+		if !ok || pass != s.config.Password {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
+			s.handleError(w, http.StatusUnauthorized, "Unauthorized")
+			return
+		}
+
+		next(w, r)
+	}
+}
+
 func applyPragmas(db *sql.DB) error {
 	pragmas := []string{
 		"PRAGMA journal_mode=WAL",
@@ -919,6 +955,11 @@ func run() error {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: logLevel,
 	}))
+
+	if cfg.Password == "" {
+		cfg.Password = generateRandomString(24)
+		logger.Info("generated app password", slog.String("password", cfg.Password))
+	}
 
 	repo, err := NewScreenshotRepository("./data/db.sqlite?cache=shared&mode=rwc&_journal_mode=WAL")
 	if err != nil {
