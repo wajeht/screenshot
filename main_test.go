@@ -41,6 +41,7 @@ func TestBasicAuth(t *testing.T) {
 		name           string
 		path           string
 		password       string
+		token          string
 		configPassword string
 		expectedStatus int
 	}{
@@ -66,6 +67,20 @@ func TestBasicAuth(t *testing.T) {
 			expectedStatus: http.StatusOK,
 		},
 		{
+			name:           "screenshots with correct token",
+			path:           "/screenshots",
+			token:          "secret",
+			configPassword: "secret",
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "screenshots with wrong token",
+			path:           "/screenshots",
+			token:          "wrong",
+			configPassword: "secret",
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
 			name:           "domains.json without auth when auth configured",
 			path:           "/domains.json",
 			password:       "",
@@ -76,6 +91,13 @@ func TestBasicAuth(t *testing.T) {
 			name:           "domains.json with correct password",
 			path:           "/domains.json",
 			password:       "secret",
+			configPassword: "secret",
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "domains.json with correct token",
+			path:           "/domains.json",
+			token:          "secret",
 			configPassword: "secret",
 			expectedStatus: http.StatusOK,
 		},
@@ -113,7 +135,9 @@ func TestBasicAuth(t *testing.T) {
 			}
 
 			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
-			if tt.password != "" {
+			if tt.token != "" {
+				req.Header.Set("X-API-Key", tt.token)
+			} else if tt.password != "" {
 				req.SetBasicAuth("", tt.password)
 			}
 			rec := httptest.NewRecorder()

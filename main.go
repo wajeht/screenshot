@@ -833,6 +833,11 @@ func (s *Server) basicAuth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
+		if r.Header.Get("X-API-Key") == s.config.Password {
+			next(w, r)
+			return
+		}
+
 		_, pass, ok := r.BasicAuth()
 		if !ok || pass != s.config.Password {
 			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)

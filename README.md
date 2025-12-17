@@ -165,13 +165,13 @@ https://screenshot.jaw.dev/blocked?domain=google.com
 
 Returns the full list of blocked domains as JSON array (~102k domains).
 
-**Authentication:** Requires password.
+**Authentication:** Requires password via Basic auth or `X-API-Key` header.
 
 ### GET /screenshots
 
 Displays a list of all cached screenshots. Returns an HTML table by default, or JSON with `?format=json`.
 
-**Authentication:** Requires password.
+**Authentication:** Requires password via Basic auth or `X-API-Key` header.
 
 **Parameters:**
 - `format` (optional): Set to `json` for JSON response
