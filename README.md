@@ -165,9 +165,13 @@ https://screenshot.jaw.dev/blocked?domain=google.com
 
 Returns the full list of blocked domains as JSON array (~102k domains).
 
+**Authentication:** Requires password.
+
 ### GET /screenshots
 
 Displays a list of all cached screenshots. Returns an HTML table by default, or JSON with `?format=json`.
+
+**Authentication:** Requires password.
 
 **Parameters:**
 - `format` (optional): Set to `json` for JSON response
@@ -195,6 +199,16 @@ https://screenshot.jaw.dev/screenshots?format=json
   }
 ]
 ```
+
+## Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `APP_ENV` | Environment (`development` or `production`) | `development` |
+| `APP_PORT` | Server port | `80` |
+| `APP_PASSWORD` | Password for protected endpoints | Auto-generated |
+
+If `APP_PASSWORD` is not set, a random 24-character password is generated on startup and logged to the console.
 
 ## 📑 Docs
 
