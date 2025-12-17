@@ -5,7 +5,7 @@ PORT=80
 
 dev:
 	@docker build -f Dockerfile.dev -t $(NAME) .
-	@docker run --rm -it -p $(PORT):80 -v $(PWD):/app $(NAME)
+	@docker run --rm -it --env-file .env -p $(PORT):80 -v $(PWD):/app $(NAME)
 
 up:
 	@make dev
