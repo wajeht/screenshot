@@ -23,7 +23,7 @@ RUN apk --no-cache add \
     freetype \
     harfbuzz
 
-RUN addgroup -g 1001 -S screenshot && adduser -S screenshot -u 1001 -G screenshot
+RUN addgroup -g 1000 -S screenshot && adduser -S screenshot -u 1000 -G screenshot
 
 WORKDIR /app
 
