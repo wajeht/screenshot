@@ -76,6 +76,7 @@ jobs:
           tags: ${{ env.IMAGE_URL }}
 
   deploy:
+    if: github.event_name == 'push'
     needs: build
     name: Deploy
     uses: wajeht/docker-cd-deploy-workflow/.github/workflows/deploy.yaml@main
