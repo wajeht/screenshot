@@ -1,9 +1,9 @@
-# 🖼️ Screenshot
+# Screenshot
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/wajeht/screenshot/blob/main/LICENSE) [![Open Source Love svg1](https://badges.frapsoft.com/os/v1/open-source.svg?v=103)](https://github.com/wajeht/screenshot)
 
 automagically capture screenshots of any url
 
-# 📖 Usage
+# Usage
 
 add this to your html:
 
@@ -210,11 +210,11 @@ https://screenshot.jaw.dev/screenshots?format=json
 
 If `APP_PASSWORD` is not set, a random 24-character password is generated on startup and logged to the console.
 
-## 📑 Docs
+## Docs
 
 - See [DEVELOPMENT](./docs/development.md) for `development` guide.
 - See [CONTRIBUTION](./docs/contribution.md) for `contribution` guide.
 
-## 📜 License
+## License
 
 Distributed under the MIT License © [wajeht](https://github.com/wajeht). See [LICENSE](./LICENSE) for more information.
