@@ -4,7 +4,7 @@ go 1.26.1
 
 require (
 	github.com/go-rod/rod v0.116.2
-	github.com/mattn/go-sqlite3 v1.14.37
+	github.com/mattn/go-sqlite3 v1.14.38
 	github.com/pressly/goose/v3 v3.27.0
 )
 
