@@ -1,6 +1,6 @@
 module github.com/wajeht/screenshot
 
-go 1.27.0
+go 1.27.1
 
 require (
 	github.com/go-rod/rod v0.116.2
