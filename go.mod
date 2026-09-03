@@ -5,7 +5,7 @@ go 1.27.1
 require (
 	github.com/go-rod/rod v0.116.2
 	github.com/mattn/go-sqlite3 v1.14.50
-	github.com/pressly/goose/v3 v3.27.3
+	github.com/pressly/goose/v3 v3.28.0
 )
 
 require (
