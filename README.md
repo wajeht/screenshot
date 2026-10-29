@@ -77,6 +77,8 @@ or preview on hover:
 </script>
 ```
 
+To proxy browser requests, run `./screenshot -rod=proxy=http://squid:3128` (or set that command in Compose). This covers page navigation and browser subresources; the proxy must allow the requested destinations.
+
 ## How it works
 
 1. **Request Processing**:
